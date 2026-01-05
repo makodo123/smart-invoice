@@ -1,0 +1,7 @@
+{
+  "name": "Smart Invoice Winner",
+  "description": "A smart Taiwan Uniform Invoice redemption app that uses AI to fetch the latest winning numbers and scan receipts.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
