@@ -35,3 +35,11 @@ export interface HistoryItem {
   timestamp: number;
   result: CheckResult;
 }
+
+export interface InvoiceData {
+  invoiceNumber: string;
+  date: string; // YYYY/MM/DD
+  amount: number;
+  storeName?: string;
+  details?: string; // Optional raw details
+}
