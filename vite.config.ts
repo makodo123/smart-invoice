@@ -9,6 +9,15 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        proxy: {
+          // The official RSS does not allow browser cross-origin requests.
+          // During local development, Vite fetches it server-side instead.
+          '/smart-invoice/api/invoice.xml': {
+            target: 'https://invoice.etax.nat.gov.tw',
+            changeOrigin: true,
+            rewrite: () => '/invoice.xml',
+          },
+        },
       },
       plugins: [react()],
       define: {
