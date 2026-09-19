@@ -198,10 +198,20 @@ export const fetchLatestWinningNumbers = async (forceRefresh = false): Promise<W
   return FALLBACK_WINNING_NUMBERS;
 };
 
+export const hasGeminiApiKey = (): boolean => {
+  const key = process.env.API_KEY || process.env.GEMINI_API_KEY;
+  return Boolean(key && key.trim().length > 0);
+};
+
 /**
  * Analyzes an invoice image using Gemini 2.0 Flash to extract structured data.
  */
 export const analyzeInvoice = async (base64Image: string, mimeType: string): Promise<InvoiceData | null> => {
+  if (!hasGeminiApiKey()) {
+    console.warn("未設定 Gemini API Key，跳過 AI 圖片解析。");
+    return null;
+  }
+
   const ai = getClient();
 
   try {

@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { WinningNumbers, CheckResult, PrizeType, HistoryItem, InvoiceData } from '../types';
 import { checkInvoice } from '../utils/checkLogic';
-import { analyzeInvoice } from '../services/gemini';
+import { analyzeInvoice, hasGeminiApiKey } from '../services/gemini';
 import { compressImage } from '../utils/imageUtils';
 import { exportToCSV } from '../utils/export';
 import { getHistory, saveHistoryItem, saveHistoryList, clearHistory, saveInvoiceData, getInvoiceData, clearInvoiceData } from '../utils/storage';
+import { decodeQRFromImage, parseTaiwanInvoiceQR } from '../utils/qrScanner';
+import { QrScannerModal } from './QrScannerModal';
 
 interface Props {
   winningNumbersList: WinningNumbers[]; 
@@ -13,12 +15,14 @@ interface Props {
 const CheckSection: React.FC<Props> = ({ winningNumbersList }) => {
   const [inputNum, setInputNum] = useState('');
   const [result, setResult] = useState<CheckResult | null>(null);
-  const [scannedData, setScannedData] = useState<InvoiceData | null>(null); // New: Store scanned details
+  const [scannedData, setScannedData] = useState<InvoiceData | null>(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [invoiceList, setInvoiceList] = useState<InvoiceData[]>([]); // New: Full data history
+  const [invoiceList, setInvoiceList] = useState<InvoiceData[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const checkPeriods = winningNumbersList.slice(0, 2);
+  const hasApiKey = hasGeminiApiKey();
 
   useEffect(() => {
     setHistory(getHistory());
@@ -128,6 +132,33 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList }) => {
     e.preventDefault();
   };
 
+  const handleScanSuccess = (data: InvoiceData) => {
+    setInputNum(data.invoiceNumber);
+    setScannedData(data);
+    const res = performCheck(data.invoiceNumber);
+    setResult(res);
+    addToHistory(data.invoiceNumber, res, data);
+  };
+
+  const handleFallbackToAi = async (file: File) => {
+    if (!hasApiKey) return;
+    setIsScanning(true);
+    try {
+      const base64Data = await compressImage(file, 1024, 0.8);
+      const data = await analyzeInvoice(base64Data, file.type);
+      if (data && data.invoiceNumber) {
+        handleScanSuccess(data);
+      } else {
+        alert("AI 圖片辨識未找到發票號碼，請手動輸入。");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("AI 辨識失敗，請重試。");
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -143,26 +174,40 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList }) => {
     setInputNum('');
 
     try {
-      // 1. Compress Image
+      // 1. 優先辨識電子發票 QR Code
+      const qrText = await decodeQRFromImage(file);
+      if (qrText) {
+        const parsed = parseTaiwanInvoiceQR(qrText);
+        if (parsed?.data && parsed.data.invoiceNumber) {
+          handleScanSuccess(parsed.data);
+          return;
+        } else if (parsed?.isRightSide) {
+          alert("偵測到電子發票右側明細條碼，請拍攝「左側」主要 QR Code 進行對獎。");
+          return;
+        }
+      }
+
+      // 2. 若無 QR Code：檢查是否有 Gemini API Key
+      if (!hasApiKey) {
+        alert("未在圖片中偵測到電子發票 QR Code。\n（因未設定 Gemini API 金鑰，不執行 AI 圖片解析，請手動輸入號碼或對準發票左側 QR Code 掃描）");
+        return;
+      }
+
+      // 3. 有 Gemini API Key 時進行 AI 備援辨識
       const base64Data = await compressImage(file, 1024, 0.8);
-      
-      // 2. AI Analysis
       const data = await analyzeInvoice(base64Data, file.type);
       
       if (data && data.invoiceNumber) {
-        setInputNum(data.invoiceNumber);
-        setScannedData(data);
-        const res = performCheck(data.invoiceNumber);
-        setResult(res);
-        addToHistory(data.invoiceNumber, res, data);
+        handleScanSuccess(data);
       } else {
-        setResult({ isMatch: false, prizeType: PrizeType.None, description: "無法辨識號碼，請手動輸入" });
+        setResult({ isMatch: false, prizeType: PrizeType.None, description: "無法辨識發票號碼，請手動輸入" });
       }
     } catch (err) {
       console.error(err);
       alert("掃描失敗，請重試");
     } finally {
       setIsScanning(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -192,7 +237,7 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList }) => {
       </h3>
 
       {/* Input Area */}
-      <div className="flex flex-col md:flex-row gap-4 mb-6">
+      <div className="flex flex-col md:flex-row gap-3 mb-6">
         <form onSubmit={handleManualSubmit} className="relative flex-grow">
           <input
             type="tel"
@@ -211,6 +256,7 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList }) => {
                 type="button"
                 onClick={() => { setInputNum(''); setResult(null); setScannedData(null); }}
                 className="text-gray-400 hover:text-gray-600 p-2"
+                title="清除輸入"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
               </button>
@@ -218,30 +264,40 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList }) => {
           </div>
         </form>
 
-        <div className="flex-shrink-0">
+        <div className="flex gap-2">
+          {/* Main QR Scanner Button */}
+          <button
+            onClick={() => setIsScannerOpen(true)}
+            disabled={winningNumbersList.length === 0 || isScanning}
+            className={`flex-1 md:flex-none flex items-center justify-center px-6 py-4 rounded-xl font-bold transition-all shadow-sm ${
+              isScanning 
+                ? 'bg-gray-100 text-gray-400 cursor-wait'
+                : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95'
+            }`}
+            title="掃描電子發票 QR Code"
+          >
+            <span className="flex items-center whitespace-nowrap">
+              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
+              掃描發票 QR Code
+            </span>
+          </button>
+
+          {/* Upload Photo Button */}
           <input 
             type="file" 
             accept="image/*" 
-            capture="environment"
             className="hidden" 
             ref={fileInputRef}
             onChange={handleFileUpload}
           />
           <button
+            type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={winningNumbersList.length === 0 || isScanning}
-            className={`w-full md:w-auto h-full flex items-center justify-center px-8 py-4 rounded-xl font-bold transition-all shadow-sm ${
-              isScanning 
-                ? 'bg-gray-100 text-gray-400 cursor-wait'
-                : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95'
-            }`}
+            className="flex items-center justify-center px-4 py-4 rounded-xl font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 active:scale-95 transition-all border border-gray-200"
+            title="選擇或拍攝發票照片"
           >
-            {(
-              <span className="flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                智能掃描
-              </span>
-            )}
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
           </button>
         </div>
       </div>
@@ -274,15 +330,15 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList }) => {
             <div className="mt-4 pt-4 border-t border-black/10 text-left bg-white/10 rounded p-3 text-sm">
               <div className="flex justify-between items-center mb-1">
                 <span className="opacity-70">消費日期：</span>
-                <span className="font-medium">{scannedData.date}</span>
+                <span className="font-medium">{scannedData.date || '無紀錄'}</span>
               </div>
               <div className="flex justify-between items-center mb-1">
-                <span className="opacity-70">商家名稱：</span>
-                <span className="font-medium">{scannedData.storeName || '未知'}</span>
+                <span className="opacity-70">商家/類型：</span>
+                <span className="font-medium">{scannedData.storeName || '電子發票'}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="opacity-70">消費金額：</span>
-                <span className="font-bold text-lg">${scannedData.amount}</span>
+                <span className="font-bold text-lg">{scannedData.amount ? `$${scannedData.amount}` : '無紀錄'}</span>
               </div>
             </div>
           )}
@@ -338,6 +394,15 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList }) => {
           </div>
         </div>
       )}
+
+      {/* Live QR Scanner Modal */}
+      <QrScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onScanSuccess={handleScanSuccess}
+        hasApiKey={hasApiKey}
+        onFallbackToAi={handleFallbackToAi}
+      />
     </div>
   );
 };
