@@ -3,26 +3,32 @@ import WinningTable from './components/WinningTable';
 import CheckSection from './components/CheckSection';
 import GmailCheckSection from './components/GmailCheckSection';
 import { WinningNumbers } from './types';
-import { fetchLatestWinningNumbers } from './services/gemini';
+import { fetchLatestWinningNumbers, FALLBACK_WINNING_NUMBERS } from './services/gemini';
 
 const App: React.FC = () => {
   const [winningNumbersList, setWinningNumbersList] = useState<WinningNumbers[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const hasFetched = useRef(false);
 
   const loadData = async (force: boolean = false) => {
     setLoading(true);
     setError(null);
+    setSuccessMessage(null);
     try {
       const data = await fetchLatestWinningNumbers(force);
       setWinningNumbersList(data);
       setSelectedIndex(0);
+      if (force) {
+        setSuccessMessage("中獎號碼已成功更新為官方最新開獎資訊！");
+      }
     } catch (err: any) {
       console.error(err);
       // Use the specific error message thrown by the service
       setError(err.message || "無法更新號碼，請稍後再試");
+      setWinningNumbersList((prev) => (prev.length > 0 ? prev : FALLBACK_WINNING_NUMBERS));
     } finally {
       setLoading(false);
     }
@@ -50,10 +56,33 @@ const App: React.FC = () => {
           <p className="text-gray-500 font-medium">官方即時更新 • AI 圖片辨識 • 快速兌獎</p>
         </header>
 
-        {error && (
-          <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-6 rounded-r shadow-sm">
-            <div className="flex">
+        {successMessage && (
+          <div className="bg-green-50 border-l-4 border-green-500 p-4 mb-6 rounded-r shadow-sm flex items-center justify-between transition-all">
+            <div className="flex items-center">
               <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-green-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm text-green-800 font-bold">更新成功</p>
+                <p className="text-sm text-green-700 mt-0.5">{successMessage}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setSuccessMessage(null)}
+              className="text-green-600 hover:text-green-800 text-sm font-semibold ml-4 p-1"
+              title="關閉"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {error && (
+          <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-6 rounded-r shadow-sm flex items-start justify-between transition-all">
+            <div className="flex items-start">
+              <div className="flex-shrink-0 pt-0.5">
                 <svg className="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                 </svg>
@@ -66,6 +95,13 @@ const App: React.FC = () => {
                 </button>
               </div>
             </div>
+            <button
+              onClick={() => setError(null)}
+              className="text-red-500 hover:text-red-700 text-sm font-semibold ml-4 p-1"
+              title="關閉"
+            >
+              ✕
+            </button>
           </div>
         )}
 
