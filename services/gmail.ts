@@ -178,12 +178,31 @@ export const requestAccessToken = () => {
   }
 };
 
+/** Remove the in-memory token and revoke the user's consent with Google. */
+export const revokeAccessToken = async (): Promise<void> => {
+  if (!accessToken || !(window as any).google) {
+    accessToken = null;
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    google.accounts.oauth2.revoke(accessToken, (response: any) => {
+      accessToken = null;
+      if (response?.error) {
+        reject(new Error(response.error_description || response.error));
+        return;
+      }
+      resolve();
+    });
+  });
+};
+
 /**
  * Fetch list of messages with a custom query using pagination
  * @param query The Gmail search query (e.g. "label:電子發票 after:...")
  * @param maxCount Maximum number of emails to fetch (safety limit)
  */
-export const fetchInvoiceEmails = async (query: string, maxCount: number = 2000): Promise<GmailMessage[]> => {
+export const fetchInvoiceEmails = async (query: string, maxCount: number = 200): Promise<GmailMessage[]> => {
   if (!accessToken) throw new Error("No access token");
 
   const encodedQuery = encodeURIComponent(query);
@@ -192,8 +211,8 @@ export const fetchInvoiceEmails = async (query: string, maxCount: number = 2000)
   
   // Pagination loop
   do {
-    // Determine how many to ask for in this page (max 500 per call supported by API)
-    const currentMax = 500;
+    // A smaller page keeps scans responsive while remaining below Gmail's 500 limit.
+    const currentMax = Math.min(100, maxCount - messages.length);
     
     let url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodedQuery}&maxResults=${currentMax}`;
     if (nextPageToken) {
@@ -229,22 +248,25 @@ export const fetchInvoiceEmails = async (query: string, maxCount: number = 2000)
 /**
  * Fetch details for a specific message and try to extract the invoice number
  */
-export const fetchMessageDetails = async (messageId: string): Promise<GmailMessage | null> => {
+export const fetchMessageDetails = async (messageId: string): Promise<GmailMessage> => {
   if (!accessToken) throw new Error("No access token");
 
-  try {
-    const response = await fetch(
-      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      }
-    );
+  const response = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    }
+  );
 
-    const data = await response.json();
-    const snippet = data.snippet;
-    const internalDate = data.internalDate;
+  if (!response.ok) {
+    throw new Error(`Gmail API Error: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  const snippet = data.snippet;
+  const internalDate = data.internalDate;
     
     // Get Subject
     const headers = data.payload?.headers || [];
@@ -271,17 +293,12 @@ export const fetchMessageDetails = async (messageId: string): Promise<GmailMessa
       fullNumber = match.fullNumber;
     }
 
-    return {
-      id: messageId,
-      snippet,
-      internalDate,
-      subject,
-      parsedNumber: parsedNumber || undefined,
-      fullNumber: fullNumber || parsedNumber || undefined
-    };
-
-  } catch (e) {
-    console.error(`Failed to fetch message ${messageId}`, e);
-    return null;
-  }
+  return {
+    id: messageId,
+    snippet,
+    internalDate,
+    subject,
+    parsedNumber: parsedNumber || undefined,
+    fullNumber: fullNumber || parsedNumber || undefined
+  };
 };

@@ -46,11 +46,20 @@ npm install
 
 ```
 GEMINI_API_KEY=你的金鑰
+VITE_GOOGLE_CLIENT_ID=你的GoogleOAuth網頁用戶端ID
 ```
 
 ```bash
 npm run dev
 ```
+
+### Gmail 自動兌獎設定
+
+1. 在 Google Cloud 專案啟用 Gmail API，並建立「網頁應用程式」OAuth Client ID。
+2. 在 Authorized JavaScript origins 加入 `http://localhost:3000` 與 `http://127.0.0.1:3000`。
+3. 將 Client ID 設定為 `.env.local` 的 `VITE_GOOGLE_CLIENT_ID`，重啟開發伺服器。
+
+Gmail 掃描只會在使用者按下授權與掃描後執行，使用 `gmail.readonly` 權限；存取權杖不會寫入磁碟。
 
 ---
 
