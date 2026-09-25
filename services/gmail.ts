@@ -8,6 +8,13 @@ export interface GmailMessage {
   parsedNumber?: string; // The 8 digits for checking
   fullNumber?: string;   // The full string (e.g. AB-12345678) for display
   subject?: string;
+  invoices?: InvoiceNumber[];
+  attachmentErrors?: number;
+}
+
+export interface InvoiceNumber {
+  parsedNumber: string;
+  fullNumber: string;
 }
 
 let tokenClient: any;
@@ -34,36 +41,33 @@ const decodeBase64Url = (data: string): string => {
   }
 };
 
-const extractInvoiceNumberFromText = (text: string): { parsedNumber: string; fullNumber: string } | null => {
-  if (!text) return null;
-  const normalized = text.toUpperCase();
-  const labeledRegex = /發票號碼[:：\s]*([A-Z]{2}[- ]?\d{8})/;
-  const strictRegex = /[A-Z]{2}[- ]?(\d{8})/;
-  const looseRegex = /號碼[:：\s]*([A-Z0-9-]{8,11})/;
+const decodeBase64UrlBytes = (data: string): Uint8Array => {
+  const normalized = data.replace(/-/g, '+').replace(/_/g, '/');
+  const decoded = atob(normalized + '='.repeat((4 - normalized.length % 4) % 4));
+  return Uint8Array.from(decoded, character => character.charCodeAt(0));
+};
 
-  const labeledMatch = normalized.match(labeledRegex);
-  if (labeledMatch && labeledMatch[1]) {
-    const fullNumber = labeledMatch[1];
-    const parsedNumber = fullNumber.replace(/[^0-9]/g, '');
-    if (parsedNumber.length === 8) {
-      return { parsedNumber, fullNumber };
-    }
+export const extractInvoiceNumbersFromText = (text: string): InvoiceNumber[] => {
+  if (!text) return [];
+  const normalized = text.toUpperCase().replace(/&NBSP;|&#160;/g, ' ');
+  const matches: InvoiceNumber[] = [];
+  const seen = new Set<string>();
+  const add = (letters: string, digits: string) => {
+    const fullNumber = letters + digits;
+    if (seen.has(fullNumber)) return;
+    seen.add(fullNumber);
+    matches.push({ parsedNumber: digits, fullNumber });
+  };
+
+  // Accept a number without its prefix only when it follows an invoice label.
+  for (const match of normalized.matchAll(/(?:\u96fb\u5b50)?\u767c\u7968(?:\u5b57\u8ecc)?\u865f\u78bc\s*[:\uff1a]?\s*(?:([A-Z]{2})\s*[-\uff0d]?\s*)?(\d{8})(?!\d)/g)) {
+    add(match[1] || '', match[2]);
   }
-
-  const strictMatch = normalized.match(strictRegex);
-  if (strictMatch && strictMatch[1]) {
-    return { parsedNumber: strictMatch[1], fullNumber: strictMatch[0] };
+  // Collect every full number, including a second invoice in the same email.
+  for (const match of normalized.matchAll(/(?<![A-Z0-9])([A-Z]{2})\s*[-\uff0d]?\s*(\d{8})(?!\d)/g)) {
+    add(match[1], match[2]);
   }
-
-  const looseMatch = normalized.match(looseRegex);
-  if (looseMatch && looseMatch[1]) {
-    const parsedNumber = looseMatch[1].replace(/[^0-9]/g, '');
-    if (parsedNumber.length === 8) {
-      return { parsedNumber, fullNumber: looseMatch[1] };
-    }
-  }
-
-  return null;
+  return matches;
 };
 
 const extractFilenamesFromHeader = (value: string): string[] => {
@@ -109,42 +113,90 @@ const getFilenameCandidates = (part: any): string[] => {
   return candidates.filter(Boolean);
 };
 
-const extractInvoiceFromPayloadFilenames = (payload: any): { parsedNumber: string; fullNumber: string } | null => {
-  if (!payload) return null;
+const extractInvoicesFromPayloadFilenames = (payload: any): InvoiceNumber[] => {
+  if (!payload) return [];
+  const matches: InvoiceNumber[] = [];
   const stack: any[] = [payload];
   while (stack.length > 0) {
     const part = stack.pop();
     if (!part) continue;
-    if (Array.isArray(part.parts)) {
-      stack.push(...part.parts);
-    }
-    const candidates = getFilenameCandidates(part);
-    for (const name of candidates) {
-      const match = extractInvoiceNumberFromText(name);
-      if (match) return match;
+    if (Array.isArray(part.parts)) stack.push(...part.parts);
+    for (const name of getFilenameCandidates(part)) {
+      matches.push(...extractInvoiceNumbersFromText(name));
     }
   }
-  return null;
+  return matches;
 };
 
-const extractInvoiceFromPayloadText = (payload: any): { parsedNumber: string; fullNumber: string } | null => {
-  if (!payload) return null;
+const extractInvoicesFromPayloadText = (payload: any): InvoiceNumber[] => {
+  if (!payload) return [];
+  const matches: InvoiceNumber[] = [];
   const stack: any[] = [payload];
   while (stack.length > 0) {
     const part = stack.pop();
     if (!part) continue;
-    if (Array.isArray(part.parts)) {
-      stack.push(...part.parts);
-    }
+    if (Array.isArray(part.parts)) stack.push(...part.parts);
     const mimeType = part.mimeType || '';
     const data = part.body?.data;
     if (data && (mimeType.startsWith('text/plain') || mimeType.startsWith('text/html'))) {
       const decoded = decodeBase64Url(data);
-      const match = extractInvoiceNumberFromText(decoded);
-      if (match) return match;
+      matches.push(...extractInvoiceNumbersFromText(decoded.replace(/<[^>]*>/g, ' ')));
     }
   }
-  return null;
+  return matches;
+};
+
+export const extractInvoiceNumbersFromMessage = (subject: string, snippet: string, payload: any): InvoiceNumber[] => {
+  const all = [
+    ...extractInvoicesFromPayloadText(payload),
+    ...extractInvoicesFromPayloadFilenames(payload),
+    ...extractInvoiceNumbersFromText(subject),
+    ...extractInvoiceNumbersFromText(snippet),
+  ];
+  return [...new Map(all.map(invoice => [invoice.fullNumber, invoice])).values()];
+};
+
+const getPdfParts = (payload: any): any[] => {
+  if (!payload) return [];
+  const pdfParts: any[] = [];
+  const stack = [payload];
+  while (stack.length) {
+    const part = stack.pop();
+    if (!part) continue;
+    if (Array.isArray(part.parts)) stack.push(...part.parts);
+    const names = getFilenameCandidates(part);
+    if (part.mimeType?.toLowerCase() === 'application/pdf' || names.some(name => /\.pdf$/i.test(name))) {
+      pdfParts.push(part);
+    }
+  }
+  return pdfParts;
+};
+
+const extractPdfInvoices = async (messageId: string, payload: any): Promise<{ invoices: InvoiceNumber[]; errors: number }> => {
+  const pdfParts = getPdfParts(payload);
+  if (pdfParts.length === 0) return { invoices: [], errors: 0 };
+  const { extractInvoiceNumbersFromPdf } = await import('./pdfInvoices.ts');
+  const invoices: InvoiceNumber[] = [];
+  let errors = 0;
+  for (const part of pdfParts) {
+    try {
+      let data = part.body?.data;
+      if (!data && part.body?.attachmentId) {
+        const response = await fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/attachments/${encodeURIComponent(part.body.attachmentId)}`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        if (!response.ok) throw new Error(`PDF attachment: ${response.status}`);
+        data = (await response.json()).data;
+      }
+      if (!data) throw new Error('PDF attachment has no data');
+      invoices.push(...await extractInvoiceNumbersFromPdf(decodeBase64UrlBytes(data)));
+    } catch (error) {
+      console.warn('Unable to read an invoice PDF attachment', error);
+      errors++;
+    }
+  }
+  return { invoices, errors };
 };
 
 /**
@@ -265,40 +317,24 @@ export const fetchMessageDetails = async (messageId: string): Promise<GmailMessa
   }
 
   const data = await response.json();
-  const snippet = data.snippet;
+  const snippet = data.snippet || '';
   const internalDate = data.internalDate;
     
-    // Get Subject
     const headers = data.payload?.headers || [];
-    const subjectHeader = headers.find((h: any) => h.name === 'Subject');
-    const subject = subjectHeader ? subjectHeader.value : '無主旨';
-
-    // Get Body (Prefer plain text, then snippet)
-    // Decoding Base64URL is complex, snippet is usually enough for the invoice number 
-    // because invoice numbers usually appear early in the email or are distinct.
-    // However, regex on snippet is safer for performance.
-    
-    let parsedNumber = null;
-    let fullNumber = null;
-
-    const subjectMatch = extractInvoiceNumberFromText(subject);
-    const filenameMatch = subjectMatch ? null : extractInvoiceFromPayloadFilenames(data.payload);
-    const snippetMatch = subjectMatch || filenameMatch ? null : extractInvoiceNumberFromText(snippet);
-    const payloadMatch =
-      subjectMatch || filenameMatch || snippetMatch ? null : extractInvoiceFromPayloadText(data.payload);
-
-    const match = subjectMatch || filenameMatch || snippetMatch || payloadMatch;
-    if (match) {
-      parsedNumber = match.parsedNumber;
-      fullNumber = match.fullNumber;
-    }
+    const subjectHeader = headers.find((h: any) => h.name?.toLowerCase() === 'subject');
+    const subject = subjectHeader ? subjectHeader.value : '\u7121\u4e3b\u65e8';
+    const textInvoices = extractInvoiceNumbersFromMessage(subject, snippet, data.payload);
+    const pdf = await extractPdfInvoices(messageId, data.payload);
+    const invoices = [...new Map([...textInvoices, ...pdf.invoices].map(invoice => [invoice.fullNumber, invoice])).values()];
 
   return {
     id: messageId,
     snippet,
     internalDate,
     subject,
-    parsedNumber: parsedNumber || undefined,
-    fullNumber: fullNumber || parsedNumber || undefined
+    invoices,
+    attachmentErrors: pdf.errors,
+    parsedNumber: invoices[0]?.parsedNumber,
+    fullNumber: invoices[0]?.fullNumber
   };
 };

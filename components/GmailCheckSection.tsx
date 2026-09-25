@@ -157,6 +157,17 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
     return list.slice(start, start + 2);
   };
 
+  const getEmailPeriodIndex = (emailTs: number, periods: WinningNumbers[]): number => {
+    return periods.findIndex(item => {
+      const match = item.period.match(/(\d{2,4})\s*年\s*(\d{1,2})\s*[-~～－至]\s*(\d{1,2})\s*月/);
+      if (!match) return false;
+      const year = Number(match[1]) >= 1911 ? Number(match[1]) : Number(match[1]) + 1911;
+      const start = new Date(year, Number(match[2]) - 1, 1).getTime();
+      const end = new Date(year, Number(match[3]), 3).getTime();
+      return emailTs >= start && emailTs < end;
+    });
+  };
+
   const scanPeriods = getScanPeriods(winningNumbersList, selectedIndex);
 
   const startScanning = async () => {
@@ -172,7 +183,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
 
     const range = getSearchRange(scanPeriods);
     let rangeLabel = "自動偵測日期";
-    let defaultQuery = '{subject:電子發票 "發票號碼"}';
+    let defaultQuery = '{發票 invoice}';
 
     if (range) {
         // Search terms are intentionally broader than a user-created label.
@@ -190,7 +201,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
       const messages = await fetchInvoiceEmails(query, MAX_SCAN_MESSAGES);
       
       if (messages.length === 0) {
-        setScanProgress(`在區間 ${rangeLabel} 找不到標籤為「電子發票」的郵件`);
+        setScanProgress(`在區間 ${rangeLabel} 找不到符合搜尋條件的郵件，請檢查標籤或自訂條件。`);
         setIsScanning(false);
         return;
       }
@@ -199,6 +210,8 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
       
       let processed = 0;
       let validDateCount = 0;
+      let invoiceCount = 0;
+      let attachmentErrors = 0;
       const newHistoryItems: HistoryItem[] = [];
       const currentHistory = getHistory();
       const matchingResults: {msg: GmailMessage, check: CheckResult}[] = [];
@@ -208,11 +221,16 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
 
       for (let index = 0; index < messages.length; index += SCAN_CONCURRENCY) {
         const batch = messages.slice(index, index + SCAN_CONCURRENCY);
-        const detailsList = await Promise.all(batch.map(message => fetchMessageDetails(message.id)));
+        const detailsList = await Promise.allSettled(batch.map(message => fetchMessageDetails(message.id)));
 
-        for (const details of detailsList) {
+        for (const detailResult of detailsList) {
           processed++;
-          if (!details) continue;
+          if (detailResult.status === 'rejected') {
+            attachmentErrors++;
+            console.warn('Unable to scan a Gmail message', detailResult.reason);
+            continue;
+          }
+          const details = detailResult.value;
 
           // Gmail's date filter has small boundary variations, so enforce the
           // selected invoice period once more before displaying any message.
@@ -220,48 +238,52 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
           if (range && (emailTs < range.minTimestamp || emailTs > range.maxTimestamp)) continue;
 
           validDateCount++;
-          let bestResult: CheckResult = { isMatch: false, prizeType: PrizeType.None, amount: 0 };
-          const logMsg = details.parsedNumber ? details : { ...details, fullNumber: '未解析' };
+          attachmentErrors += details.attachmentErrors || 0;
+          const invoices = details.invoices || [];
+          if (invoices.length === 0) {
+            scanLog.push({ msg: { ...details, fullNumber: '未解析' }, check: { isMatch: false, prizeType: PrizeType.None, amount: 0 } });
+          }
 
-          if (details.parsedNumber) {
-            for (let periodIndex = 0; periodIndex < scanPeriods.length; periodIndex++) {
-              const result = checkInvoice(details.parsedNumber, scanPeriods[periodIndex], periodIndex === 0);
-              if (result.isMatch) {
-                bestResult = result;
-                break;
-              }
+          for (const invoice of invoices) {
+            invoiceCount++;
+            const invoiceMsg = { ...details, ...invoice };
+            let bestResult: CheckResult = { isMatch: false, prizeType: PrizeType.None, amount: 0 };
+            const emailPeriodIndex = getEmailPeriodIndex(emailTs, scanPeriods);
+            if (emailPeriodIndex >= 0) {
+              const periodIndex = emailPeriodIndex;
+              const result = checkInvoice(invoice.parsedNumber, scanPeriods[periodIndex], periodIndex === 0);
+              bestResult = result;
             }
 
-            if (bestResult.isMatch && !seenInvoiceNumbers.has(details.parsedNumber)) {
-              seenInvoiceNumbers.add(details.parsedNumber);
-              matchingResults.push({ msg: details, check: bestResult });
+            if (bestResult.isMatch && !seenInvoiceNumbers.has(invoice.fullNumber)) {
+              seenInvoiceNumbers.add(invoice.fullNumber);
+              matchingResults.push({ msg: invoiceMsg, check: bestResult });
 
-              if (!knownHistoryNumbers.has(details.parsedNumber)) {
-                knownHistoryNumbers.add(details.parsedNumber);
+              if (!knownHistoryNumbers.has(invoice.parsedNumber)) {
+                knownHistoryNumbers.add(invoice.parsedNumber);
                 newHistoryItems.push({
                   id: `${Date.now()}-${Math.random()}`,
-                  number: details.parsedNumber,
+                  number: invoice.parsedNumber,
                   timestamp: emailTs,
                   result: bestResult
                 });
               }
             }
+            scanLog.push({ msg: invoiceMsg, check: bestResult });
           }
-
-          scanLog.push({ msg: logMsg, check: bestResult });
         }
 
         setResults([...matchingResults]);
         setScannedLog([...scanLog]);
         setScannedCount(validDateCount);
-        setScanProgress(`正在處理 (${processed}/${messages.length})，符合日期: ${validDateCount} 封...`);
+        setScanProgress(`正在處理 (${processed}/${messages.length})，找到 ${invoiceCount} 張發票...`);
       }
 
       if (newHistoryItems.length > 0) {
           saveHistoryList([...newHistoryItems, ...currentHistory].slice(0, 50));
       }
 
-      setScanProgress(`掃描完成！篩選後共 ${validDateCount} 封符合 ${rangeLabel} 區間，發現 ${matchingResults.length} 張中獎發票。`);
+      setScanProgress(`掃描完成！${validDateCount} 封符合日期，解析出 ${invoiceCount} 張發票，發現 ${matchingResults.length} 張號碼符合獎號。${attachmentErrors ? ` 有 ${attachmentErrors} 封郵件或附件讀取失敗。` : ''}${messages.length === MAX_SCAN_MESSAGES ? ' 已達掃描上限，可能還有未掃描郵件。' : ''}`);
 
     } catch (e: any) {
       console.error(e);
@@ -387,7 +409,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
           type="text"
           value={queryOverride}
           onChange={(event) => setQueryOverride(event.target.value)}
-          placeholder="預設：依期別與「電子發票／發票號碼」搜尋"
+          placeholder="預設：依期別搜尋含「發票／invoice」的郵件"
           className="w-full bg-white p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-red-100 focus:border-red-400 outline-none"
         />
         <p className="mt-1 text-xs text-gray-500">只在你按下掃描後讀取最多 {MAX_SCAN_MESSAGES} 封符合條件的信件；內容不會傳送到本服務。</p>
@@ -426,7 +448,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
             
             {!isScanning && rangeInfo && (
                 <div className="mt-2 text-center text-xs text-gray-400">
-                    將只顯示 {rangeInfo.label} 期間的發票
+                    依收信日期掃描 {rangeInfo.label}；中獎時請核對發票實際開立期別
                 </div>
             )}
             {!isScanning && scanProgress && (
@@ -478,7 +500,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
         <div className="mt-8 animate-fade-in">
             <h4 className="font-bold text-gray-700 mb-3 flex items-center">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 text-gray-500"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-                本次掃描明細 (只顯示 {rangeInfo?.label} 期間)
+                本次掃描明細 (收信日期：{rangeInfo?.label})
             </h4>
             <div className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden shadow-sm">
                 <div className="max-h-64 overflow-y-auto custom-scrollbar">
@@ -507,7 +529,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
                                         {item.check.isMatch ? (
                                             <span className="text-red-600 font-bold text-xs bg-red-100 px-2 py-1 rounded-full">{item.check.prizeType}</span>
                                         ) : (
-                                            <span className="text-gray-400 text-xs">未中獎</span>
+                                            <span className="text-gray-400 text-xs">{item.msg.parsedNumber ? '未中獎' : item.msg.attachmentErrors ? '附件讀取失敗' : '未解析'}</span>
                                         )}
                                     </td>
                                 </tr>
