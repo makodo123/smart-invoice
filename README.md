@@ -1,6 +1,6 @@
 # 統一發票智能對獎
 
-> 用手機拍發票、輸入號碼、或直接掃描 Gmail，一鍵對照財政部最新獎號。
+> 用手機拍發票、輸入號碼，或在設定 Gmail 授權後掃描電子發票，對照財政部開獎資料。
 
 ---
 
@@ -12,7 +12,7 @@
 
 ## 功能
 
-- **即時獎號** — 自動從財政部電子發票整合服務平台抓取最新兩期獎號，支援切換期別
+- **獎號更新** — 優先讀取每日更新的財政部官方 RSS 快照，並支援切換期別；來源無法連線時使用快取或內建備援資料
 - **手動輸入對獎** — 輸入發票末三碼或完整號碼，即時比對所有獎項
 - **QR Code / 相機辨識** — 支援電子發票 QR Code 即時相機取景與圖片掃描（毫秒級對獎、免 API 即可用）；若有設定 Gemini API 亦支援實體發票 AI 圖片辨識備援
 - **Gmail 自動對獎** — 授權後掃描收件匣中的電子發票，批次比對結果一次顯示
@@ -23,18 +23,18 @@
 
 | 分類 | 技術 |
 |------|------|
-| 前端框架 | React 18 + TypeScript |
+| 前端框架 | React 19 + TypeScript |
 | 建置工具 | Vite |
 | 樣式 | Tailwind CSS |
 | AI 圖片辨識 | Gemini Vision API |
-| 獎號資料 | 財政部電子發票整合服務平台（官方公開 API）|
+| 獎號資料 | 財政部電子發票整合服務平台（官方 RSS）|
 | Gmail 整合 | Google OAuth 2.0 + Gmail API |
 
 ---
 
 ## 本機執行
 
-**前置需求**：Node.js 18+、Gemini API Key
+**前置需求**：Node.js 18+。手動輸入與 QR Code 對獎不需要 Gemini API Key；AI 圖片辨識需要設定金鑰。
 
 ```bash
 git clone https://github.com/makodo123/smart-invoice.git
@@ -65,7 +65,7 @@ Gmail 掃描只會在使用者按下授權與掃描後執行，使用 `gmail.rea
 
 ## 資料來源
 
-發票獎號資料來自[財政部電子發票整合服務平台](https://www.einvoice.nat.gov.tw/)公開 API，圖片辨識由 Google Gemini 提供。
+發票獎號資料來自[財政部電子發票整合服務平台](https://www.einvoice.nat.gov.tw/)的[官方 RSS](https://invoice.etax.nat.gov.tw/invoice.xml)。排程每天擷取官方 RSS，寫入 `public/invoice.xml`；網站優先讀取 GitHub 上的快照，無法取得時才使用本機快照、快取或內建備援資料。備援資料可能不是最新期別，對獎結果請以財政部公告為準。圖片辨識由 Google Gemini 提供。
 
 ---
 
