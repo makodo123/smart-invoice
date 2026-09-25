@@ -1,0 +1,31 @@
+name: Update official invoice feed
+
+on:
+  schedule:
+    - cron: '20 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Fetch official RSS
+        run: node scripts/update-invoice-feed.mjs
+      - name: Commit changed snapshot
+        run: |
+          if git diff --quiet -- public/invoice.xml; then
+            echo 'Official feed unchanged'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/invoice.xml
+          git commit -m 'data: refresh official invoice feed'
+          git push origin HEAD:main
