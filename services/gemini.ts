@@ -5,8 +5,8 @@ import { WinningNumbers, InvoiceData } from '../types';
 const getClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // Bump the key so an older cache containing partially-parsed numbers is not reused.
-const CACHE_KEY = 'invoice_winning_numbers_cache_v4';
-const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
+const CACHE_KEY = 'invoice_winning_numbers_cache_v5';
+const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
 
 type PrizeLabel = '特別獎' | '特獎' | '頭獎' | '增開六獎';
 
@@ -16,6 +16,13 @@ const labels: PrizeLabel[] = ['特別獎', '特獎', '頭獎', '增開六獎'];
  * 預載/備用官方中獎號碼（確保離線、靜態託管或財政部主機連線異常時，使用者仍可正常對獎）
  */
 export const FALLBACK_WINNING_NUMBERS: WinningNumbers[] = [
+  {
+    period: '115年 07~08月',
+    specialPrize: '89996565',
+    grandPrize: '91098182',
+    firstPrize: ['54348835', '44991397', '06595111'],
+    additionalSixthPrize: []
+  },
   {
     period: '115年 05~06月',
     specialPrize: '38548029',
@@ -35,13 +42,6 @@ export const FALLBACK_WINNING_NUMBERS: WinningNumbers[] = [
     specialPrize: '87510041',
     grandPrize: '32220522',
     firstPrize: ['21677046', '44662410', '31262513'],
-    additionalSixthPrize: []
-  },
-  {
-    period: '114年 11~12月',
-    specialPrize: '97023797',
-    grandPrize: '00507588',
-    firstPrize: ['92377231', '05232592', '78125249'],
     additionalSixthPrize: []
   }
 ];
@@ -125,8 +125,10 @@ export const fetchLatestWinningNumbers = async (forceRefresh = false): Promise<W
   const TARGET_URL = "https://invoice.etax.nat.gov.tw/invoice.xml";
   const baseUrl = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
   
-  // 依序嘗試同源代理與外部來源
+  // GitHub Pages 沒有後端代理；GitHub raw 提供跨來源可讀的每日官方 RSS 快照。
   const sourceUrls = [
+    `https://raw.githubusercontent.com/makodo123/smart-invoice/main/public/invoice.xml?t=${Date.now()}`,
+    `${baseUrl}/invoice.xml`,
     `${baseUrl}/api/invoice.xml`,
     '/api/invoice.xml',
     TARGET_URL,
@@ -193,7 +195,7 @@ export const fetchLatestWinningNumbers = async (forceRefresh = false): Promise<W
   // 若完全無快取可用，寫入並回傳預載 fallback 資料
   localStorage.setItem(CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: FALLBACK_WINNING_NUMBERS }));
   if (forceRefresh) {
-    throw new Error("無法連線至財政部即時資料來源，已載入內建最新開獎資料。");
+    throw new Error("無法取得官方資料，已載入內建備援獎號；請核對期別。");
   }
   return FALLBACK_WINNING_NUMBERS;
 };
