@@ -57,7 +57,7 @@ const WinningTable: React.FC<Props> = ({ data, periods, selectedIndex, onSelectP
                   : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
               }`}
             >
-              {period} {idx === 0 && '(最新)'}
+              {period}
             </button>
           ))}
         </div>
@@ -71,6 +71,7 @@ const WinningTable: React.FC<Props> = ({ data, periods, selectedIndex, onSelectP
 
       {data && (
         <div className="space-y-4 relative z-10 animate-fade-in">
+          <p className="text-xs text-gray-500">離線或來源異常時可能顯示備援期別；對獎請以財政部公告為準。</p>
           {/* Special Prize */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-4 border-b border-gray-100 pb-4">
             <div className="text-gray-500 font-medium md:col-span-1 flex items-center">

@@ -22,7 +22,7 @@ const App: React.FC = () => {
       setWinningNumbersList(data);
       setSelectedIndex(0);
       if (force) {
-        setSuccessMessage("中獎號碼已成功更新為官方最新開獎資訊！");
+        setSuccessMessage("已重新載入可取得的獎號資料，請核對期別。");
       }
     } catch (err: any) {
       console.error(err);
@@ -53,7 +53,7 @@ const App: React.FC = () => {
           <h1 className="text-3xl md:text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 mb-2">
             統一發票智能對獎
           </h1>
-          <p className="text-gray-500 font-medium">官方即時更新 • AI 圖片辨識 • 快速兌獎</p>
+          <p className="text-gray-500 font-medium">財政部獎號資料 • QR Code 對獎 • Gmail 掃描</p>
         </header>
 
         {successMessage && (
