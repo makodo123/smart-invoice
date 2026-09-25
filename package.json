@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build --configLoader runner",
     "preview": "vite preview"
   },
   "dependencies": {
     "@google/genai": "^1.34.0",
     "jsqr": "^1.4.0",
+    "pdfjs-dist": "^5.4.296",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
   },
