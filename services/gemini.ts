@@ -4,16 +4,31 @@ import { WinningNumbers, InvoiceData } from '../types';
 // Initialize Gemini Client
 const getClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// Bump the key so an older cache containing partially-parsed numbers is not reused.
-const CACHE_KEY = 'invoice_winning_numbers_cache_v5';
+// Bump the key so an older cache (v5 could hold the built-in fallback marked as fresh) is not reused.
+const CACHE_KEY = 'invoice_winning_numbers_cache_v6';
 const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
+
+/**
+ * live：本次從資料來源取得（或 1 小時內的快取）
+ * cache：所有來源失敗，改用先前成功下載的舊快取
+ * fallback：所有來源失敗且無快取，改用程式內建獎號
+ */
+export type WinningNumbersSource = 'live' | 'cache' | 'fallback';
+
+export interface WinningNumbersResult {
+  data: WinningNumbers[];
+  source: WinningNumbersSource;
+  /** 資料下載時間（fallback 為 null） */
+  fetchedAt: number | null;
+}
 
 type PrizeLabel = '特別獎' | '特獎' | '頭獎' | '增開六獎';
 
 const labels: PrizeLabel[] = ['特別獎', '特獎', '頭獎', '增開六獎'];
 
 /**
- * 預載/備用官方中獎號碼（確保離線、靜態託管或財政部主機連線異常時，使用者仍可正常對獎）
+ * 預載/備用官方中獎號碼：所有資料來源都失敗且沒有快取時使用。
+ * 只涵蓋下列期別，之後新開獎的期別需連線取得。
  */
 export const FALLBACK_WINNING_NUMBERS: WinningNumbers[] = [
   {
@@ -106,7 +121,7 @@ const fetchText = async (url: string): Promise<string> => {
 /**
  * Fetches the latest winning numbers.
  */
-export const fetchLatestWinningNumbers = async (forceRefresh = false): Promise<WinningNumbers[]> => {
+export const fetchLatestWinningNumbers = async (forceRefresh = false): Promise<WinningNumbersResult> => {
   if (!forceRefresh) {
     try {
       const cachedString = localStorage.getItem(CACHE_KEY);
@@ -114,7 +129,7 @@ export const fetchLatestWinningNumbers = async (forceRefresh = false): Promise<W
         const { timestamp, data } = JSON.parse(cachedString);
         const age = Date.now() - timestamp;
         if (age < CACHE_DURATION && Array.isArray(data) && data.every(isWinningNumbers)) {
-          return data;
+          return { data, source: 'live', fetchedAt: timestamp };
         }
       }
     } catch (e) {
@@ -167,37 +182,30 @@ export const fetchLatestWinningNumbers = async (forceRefresh = false): Promise<W
       }
 
       if (results.length > 0 && results.every(isWinningNumbers)) {
-        localStorage.setItem(CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: results }));
-        return results;
+        const fetchedAt = Date.now();
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ timestamp: fetchedAt, data: results }));
+        return { data: results, source: 'live', fetchedAt };
       }
     } catch (e) {
       console.warn(`Source ${url} failed`, e);
     }
   }
 
-  // 嘗試讀取舊快取
+  // 所有來源都失敗：改用舊快取，並標記為離線資料
   try {
     const cachedString = localStorage.getItem(CACHE_KEY);
     if (cachedString) {
-      const { data } = JSON.parse(cachedString);
+      const { timestamp, data } = JSON.parse(cachedString);
       if (Array.isArray(data) && data.every(isWinningNumbers)) {
-        if (forceRefresh) {
-          throw new Error("無法連線至財政部即時資料來源，已保留現有獎號。");
-        }
-        return data;
+        return { data, source: 'cache', fetchedAt: typeof timestamp === 'number' ? timestamp : null };
       }
     }
-  } catch (error: any) {
-    if (forceRefresh) throw error;
+  } catch (error) {
     console.warn('Stale cache read failed', error);
   }
 
-  // 若完全無快取可用，寫入並回傳預載 fallback 資料
-  localStorage.setItem(CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: FALLBACK_WINNING_NUMBERS }));
-  if (forceRefresh) {
-    throw new Error("無法取得官方資料，已載入內建備援獎號；請核對期別。");
-  }
-  return FALLBACK_WINNING_NUMBERS;
+  // 完全無快取：回傳內建獎號。不寫入快取，下次開啟時仍會重新嘗試所有來源。
+  return { data: FALLBACK_WINNING_NUMBERS, source: 'fallback', fetchedAt: null };
 };
 
 export const hasGeminiApiKey = (): boolean => {

@@ -3,7 +3,10 @@ import WinningTable from './components/WinningTable';
 import CheckSection from './components/CheckSection';
 import GmailCheckSection from './components/GmailCheckSection';
 import { WinningNumbers } from './types';
-import { fetchLatestWinningNumbers, FALLBACK_WINNING_NUMBERS } from './services/gemini';
+import { fetchLatestWinningNumbers, FALLBACK_WINNING_NUMBERS, WinningNumbersSource } from './services/gemini';
+
+const formatFetchedAt = (ts: number) =>
+  new Date(ts).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 
 const App: React.FC = () => {
   const [winningNumbersList, setWinningNumbersList] = useState<WinningNumbers[]>([]);
@@ -11,6 +14,7 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [offlineNotice, setOfflineNotice] = useState<{ source: Exclude<WinningNumbersSource, 'live'>; fetchedAt: number | null } | null>(null);
   const hasFetched = useRef(false);
 
   const loadData = async (force: boolean = false) => {
@@ -18,11 +22,12 @@ const App: React.FC = () => {
     setError(null);
     setSuccessMessage(null);
     try {
-      const data = await fetchLatestWinningNumbers(force);
+      const { data, source, fetchedAt } = await fetchLatestWinningNumbers(force);
       setWinningNumbersList(data);
       setSelectedIndex(0);
-      if (force) {
-        setSuccessMessage("已重新載入可取得的獎號資料，請核對期別。");
+      setOfflineNotice(source === 'live' ? null : { source, fetchedAt });
+      if (force && source === 'live') {
+        setSuccessMessage(`已更新至最新資料（最新一期：${data[0].period}）。`);
       }
     } catch (err: any) {
       console.error(err);
@@ -75,6 +80,21 @@ const App: React.FC = () => {
               title="關閉"
             >
               ✕
+            </button>
+          </div>
+        )}
+
+        {offlineNotice && !loading && (
+          <div className="bg-amber-50 border-l-4 border-amber-500 p-4 mb-6 rounded-r shadow-sm" role="status">
+            <p className="text-sm text-amber-800 font-bold">目前為離線資料，最新一期可能尚未收錄</p>
+            <p className="text-sm text-amber-700 mt-1">
+              {offlineNotice.source === 'cache'
+                ? `無法連線至開獎資料來源，目前顯示${offlineNotice.fetchedAt ? ` ${formatFetchedAt(offlineNotice.fetchedAt)} ` : '先前'}下載的獎號`
+                : '無法連線至開獎資料來源，目前顯示程式內建獎號'}
+              （收錄至 {winningNumbersList[0]?.period}）。對獎前請先核對期別。
+            </p>
+            <button onClick={() => loadData(true)} className="mt-2 text-sm text-amber-800 underline hover:text-amber-600 font-medium">
+              重試連線
             </button>
           </div>
         )}
