@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
 import { WinningNumbers, InvoiceData } from '../types';
 
 // Initialize Gemini Client
@@ -230,17 +230,19 @@ export const analyzeInvoice = async (base64Image: string, mimeType: string): Pro
       contents: {
         parts: [
           { inlineData: { data: base64Image, mimeType: mimeType } },
-          { text: "請分析這張台灣統一發票，並提取：發票號碼(8碼)、日期(YYYY/MM/DD)、總金額(數字)、商家名稱。找不到發票號碼時，invoiceNumber 填 null。" }
+          { text: "請分析這張台灣統一發票，並提取：發票號碼(8碼)、日期(YYYY/MM/DD)、總金額(數字)、商家名稱。找不到發票號碼或總金額時，該欄位填 null。" }
         ]
       },
       config: {
+        // 只是從照片讀出號碼與金額，不需要推理；3.6 Flash 預設會用中等思考，調到最低讓掃描更快
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
             invoiceNumber: { type: Type.STRING, nullable: true, description: "8-digit invoice number only; null if not found" },
             date: { type: Type.STRING, description: "Date in YYYY/MM/DD format" },
-            amount: { type: Type.NUMBER, description: "Total amount" },
+            amount: { type: Type.NUMBER, nullable: true, description: "Total amount; null if not found" },
             storeName: { type: Type.STRING, description: "Store name" }
           },
           required: ["invoiceNumber", "amount"]
@@ -254,8 +256,9 @@ export const analyzeInvoice = async (base64Image: string, mimeType: string): Pro
     const data = JSON.parse(text) as InvoiceData;
     // Basic validation
     if (!data.invoiceNumber || data.invoiceNumber.length !== 8) return null;
-    
-    return data;
+
+    // 找不到金額時用 0，與 QR Code 解析一致（畫面會顯示「無紀錄」）
+    return { ...data, amount: data.amount ?? 0 };
 
   } catch (error) {
     console.error("Error analyzing invoice:", error);
