@@ -214,7 +214,7 @@ export const hasGeminiApiKey = (): boolean => {
 };
 
 /**
- * Analyzes an invoice image using Gemini 2.0 Flash to extract structured data.
+ * Analyzes an invoice image using Gemini Flash to extract structured data.
  */
 export const analyzeInvoice = async (base64Image: string, mimeType: string): Promise<InvoiceData | null> => {
   if (!hasGeminiApiKey()) {
@@ -226,11 +226,11 @@ export const analyzeInvoice = async (base64Image: string, mimeType: string): Pro
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-3.6-flash",
       contents: {
         parts: [
           { inlineData: { data: base64Image, mimeType: mimeType } },
-          { text: "請分析這張台灣統一發票，並提取：發票號碼(8碼)、日期(YYYY/MM/DD)、總金額(數字)、商家名稱。如果找不到發票號碼，請回傳 null。" }
+          { text: "請分析這張台灣統一發票，並提取：發票號碼(8碼)、日期(YYYY/MM/DD)、總金額(數字)、商家名稱。找不到發票號碼時，invoiceNumber 填 null。" }
         ]
       },
       config: {
@@ -238,7 +238,7 @@ export const analyzeInvoice = async (base64Image: string, mimeType: string): Pro
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            invoiceNumber: { type: Type.STRING, description: "8-digit invoice number only" },
+            invoiceNumber: { type: Type.STRING, nullable: true, description: "8-digit invoice number only; null if not found" },
             date: { type: Type.STRING, description: "Date in YYYY/MM/DD format" },
             amount: { type: Type.NUMBER, description: "Total amount" },
             storeName: { type: Type.STRING, description: "Store name" }
@@ -248,7 +248,7 @@ export const analyzeInvoice = async (base64Image: string, mimeType: string): Pro
       }
     });
 
-    const text = response.text();
+    const text = response.text;
     if (!text) return null;
     
     const data = JSON.parse(text) as InvoiceData;
