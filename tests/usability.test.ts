@@ -4,7 +4,7 @@ import {
   findCandidatePeriodIndexes, findPeriodIndexForDate, getClaimWindow, getComparePeriods, isClaimExpired, parseInvoiceDate,
 } from '../utils/period';
 import { parseTaiwanInvoiceQR } from '../utils/qrScanner';
-import { extractInvoiceDateFromText } from '../services/gmail';
+import { extractInvoiceDateFromText, extractInvoiceNumbersFromMessage } from '../services/gmail';
 import { buildInvoiceCSV } from '../utils/export';
 import { PrizeType, WinningNumbers } from '../types';
 
@@ -144,6 +144,27 @@ describe('QR Code 與 Gmail 解析', () => {
     // 號碼後面不是日期時不誤判
     expect(extractInvoiceDateFromText('發票號碼 FQ58392856 隨機碼 8591')).toBeUndefined();
     expect(extractInvoiceDateFromText('訂單 26101923260194 2026-10-19')).toBeUndefined();
+  });
+});
+
+describe('Google Payments 發票信', () => {
+  // 實際格式：內文只有客戶號碼，發票號碼只出現在 PDF 附件的檔名
+  const payload = {
+    mimeType: 'multipart/mixed',
+    parts: [
+      { mimeType: 'text/plain', body: { data: Buffer.from('附件為您的統一發票 客戶號碼 4617-6089-0322').toString('base64url') } },
+      {
+        mimeType: 'application/pdf',
+        filename: 'CG32433969.pdf',
+        headers: [{ name: 'Content-Disposition', value: 'attachment; filename="CG32433969.pdf"' }],
+        body: { attachmentId: 'attachment-1' },
+      },
+    ],
+  };
+
+  test('從附件檔名讀出發票號碼，不把客戶號碼當成發票', () => {
+    const invoices = extractInvoiceNumbersFromMessage('Google：隨信附上您的電子應付憑據 (統一發票)', '客戶號碼 4617-6089-0322', payload);
+    expect(invoices).toEqual([{ parsedNumber: '32433969', fullNumber: 'CG32433969' }]);
   });
 });
 
