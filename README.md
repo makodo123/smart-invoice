@@ -59,8 +59,12 @@ npm run dev
 ### Gmail 自動兌獎設定
 
 1. 在 Google Cloud 專案啟用 Gmail API，並建立「網頁應用程式」OAuth Client ID。
-2. 在 Authorized JavaScript origins 加入 `http://localhost:3000` 與 `http://127.0.0.1:3000`。
-3. 將 Client ID 設定為 `.env.local` 的 `VITE_GOOGLE_CLIENT_ID`，重啟開發伺服器。
+2. 在 Authorized JavaScript origins 加入正式網址 `https://makodo123.github.io`，開發時再加入 `http://localhost:3000` 與 `http://127.0.0.1:3000`。
+3. 正式版的 Client ID 已寫在 `.env.production`（`npm run build` 會自動讀取）。本機開發請在 `.env.local` 設定 `VITE_GOOGLE_CLIENT_ID`，並重啟開發伺服器。
+
+Client ID 是公開資訊，可以提交進 repo；保護它的是上面的 Authorized JavaScript origins。本專案在瀏覽器內取得權杖，不使用也不需要 Client Secret。
+
+`gmail.readonly` 屬於 Google 的受限範圍：OAuth 同意畫面為「測試中」時，只有加入「測試使用者」的帳號（上限 100 個）可以登入；要開放給所有人需通過 Google 審核。
 
 Gmail 掃描只會在使用者按下授權與掃描後執行，使用 `gmail.readonly` 權限；存取權杖不會寫入磁碟。
 

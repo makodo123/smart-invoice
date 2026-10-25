@@ -377,7 +377,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
       {needsConfig && (
         <div className="bg-orange-50 p-4 rounded-xl mb-4 border border-orange-200 animate-fade-in">
            <h4 className="text-sm font-bold text-orange-800 mb-2">設定 Google Client ID</h4>
-           <p className="text-xs text-orange-700 mb-2">請輸入 Web Application 類型的 Client ID。建議在 <code>.env.local</code> 設定 <code>VITE_GOOGLE_CLIENT_ID</code>。</p>
+           <p className="text-xs text-orange-700 mb-2">請輸入 Web Application 類型的 Client ID。正式版請在 <code>.env.production</code>、本機開發請在 <code>.env.local</code> 設定 <code>VITE_GOOGLE_CLIENT_ID</code>。</p>
            <input 
              type="text" 
              value={clientId}
