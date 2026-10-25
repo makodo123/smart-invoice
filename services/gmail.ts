@@ -12,6 +12,8 @@ export interface GmailMessage {
   attachmentErrors?: number;
   /** 信件或附件中標示的發票日期（YYYY/MM/DD），用來判斷期別 */
   invoiceDate?: string;
+  /** 需要密碼才能開啟的 PDF 附件數（通常是帳單，不是發票） */
+  protectedAttachments?: number;
 }
 
 /** Gmail 授權過期或被撤銷（HTTP 401），需要重新登入 */
@@ -94,12 +96,7 @@ export const extractInvoiceNumbersFromText = (text: string): InvoiceNumber[] => 
   return matches;
 };
 
-/**
- * 找出「發票日期／開立日期」等標示後的日期，回傳 YYYY/MM/DD。支援西元與民國年。
- */
-export const extractInvoiceDateFromText = (text: string): string | undefined => {
-  if (!text) return undefined;
-  const match = text.match(/(?:\u767c\u7968|\u958b\u7acb|\u4ea4\u6613|\u6d88\u8cbb)(?:\u65e5\u671f|\u6642\u9593)\s*[:\uff1a]?\s*(\d{3,4})\s*[\/\-.\u5e74]\s*(\d{1,2})\s*[\/\-.\u6708]\s*(\d{1,2})/);
+const toInvoiceDate = (match: RegExpMatchArray | null): string | undefined => {
   if (!match) return undefined;
   const rawYear = Number(match[1]);
   const year = rawYear >= 1911 ? rawYear : rawYear + 1911;
@@ -108,6 +105,19 @@ export const extractInvoiceDateFromText = (text: string): string | undefined => 
   if (month < 1 || month > 12 || day < 1 || day > 31) return undefined;
   return `${year}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`;
 };
+
+/**
+ * 找出「發票日期／開立日期」等標示後的日期，或緊接在發票號碼後面的日期，回傳 YYYY/MM/DD。
+ * 支援西元與民國年。
+ */
+export const extractInvoiceDateFromText = (text: string): string | undefined => {
+  if (!text) return undefined;
+  const labelled = text.match(/(?:\u767c\u7968|\u958b\u7acb|\u4ea4\u6613|\u6d88\u8cbb)(?:\u65e5\u671f|\u6642\u9593)\s*[:\uff1a]?\s*(\d{3,4})\s*[\/\-.\u5e74]\s*(\d{1,2})\s*[\/\-.\u6708]\s*(\d{1,2})/);
+  // 沒有標示時，接受緊接在發票號碼後面的日期（例如 momo：「EQ-32140849 2026-10-19」）
+  const afterNumber = text.match(/(?<![A-Za-z0-9])[A-Za-z]{2}\s*[-\uff0d]?\s*\d{8}\s+(\d{4})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{1,2})(?!\d)/);
+  return toInvoiceDate(labelled) ?? toInvoiceDate(afterNumber);
+};
+
 
 const extractFilenamesFromHeader = (value: string): string[] => {
   if (!value) return [];
@@ -228,13 +238,14 @@ const getPdfParts = (payload: any): any[] => {
   return pdfParts;
 };
 
-const extractPdfInvoices = async (messageId: string, payload: any): Promise<{ invoices: InvoiceNumber[]; errors: number; invoiceDate?: string }> => {
+const extractPdfInvoices = async (messageId: string, payload: any): Promise<{ invoices: InvoiceNumber[]; errors: number; protectedCount: number; invoiceDate?: string }> => {
   const pdfParts = getPdfParts(payload);
-  if (pdfParts.length === 0) return { invoices: [], errors: 0 };
+  if (pdfParts.length === 0) return { invoices: [], errors: 0, protectedCount: 0 };
   const { extractInvoicesFromPdf } = await import('./pdfInvoices.ts');
   const invoices: InvoiceNumber[] = [];
   let invoiceDate: string | undefined;
   let errors = 0;
+  let protectedCount = 0;
   for (const part of pdfParts) {
     try {
       let data = part.body?.data;
@@ -246,6 +257,10 @@ const extractPdfInvoices = async (messageId: string, payload: any): Promise<{ in
       }
       if (!data) throw new Error('PDF attachment has no data');
       const pdf = await extractInvoicesFromPdf(decodeBase64UrlBytes(data));
+      if (pdf.passwordProtected) {
+        protectedCount++;
+        continue;
+      }
       invoices.push(...pdf.invoices);
       invoiceDate ??= pdf.invoiceDate;
     } catch (error) {
@@ -254,7 +269,7 @@ const extractPdfInvoices = async (messageId: string, payload: any): Promise<{ in
       errors++;
     }
   }
-  return { invoices, errors, invoiceDate };
+  return { invoices, errors, protectedCount, invoiceDate };
 };
 
 /**
@@ -370,6 +385,7 @@ export const fetchMessageDetails = async (messageId: string): Promise<GmailMessa
     subject,
     invoices,
     attachmentErrors: pdf.errors,
+    protectedAttachments: pdf.protectedCount,
     invoiceDate,
     parsedNumber: invoices[0]?.parsedNumber,
     fullNumber: invoices[0]?.fullNumber

@@ -209,6 +209,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
       let validDateCount = 0;
       let invoiceCount = 0;
       let attachmentErrors = 0;
+      let protectedCount = 0;
       const newHistoryItems: HistoryItem[] = [];
       const matchingResults: {msg: GmailMessage, check: CheckResult}[] = [];
       const scanLog: {msg: GmailMessage, check: CheckResult}[] = [];
@@ -235,6 +236,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
 
           validDateCount++;
           attachmentErrors += details.attachmentErrors || 0;
+          protectedCount += details.protectedAttachments || 0;
           const invoices = details.invoices || [];
           if (invoices.length === 0) {
             scanLog.push({ msg: { ...details, fullNumber: '未解析' }, check: { isMatch: false, prizeType: PrizeType.None, amount: 0 } });
@@ -273,7 +275,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
       // 寫入前重新讀取歷史紀錄，不會覆蓋掃描期間手動對獎的紀錄
       addHistoryItems(newHistoryItems);
 
-      setScanProgress(`掃描完成！${validDateCount} 封符合日期，解析出 ${invoiceCount} 張發票，發現 ${matchingResults.length} 張號碼符合獎號。${attachmentErrors ? ` 有 ${attachmentErrors} 封郵件或附件讀取失敗。` : ''}${messages.length === MAX_SCAN_MESSAGES ? ' 已達掃描上限，可能還有未掃描郵件。' : ''}`);
+      setScanProgress(`掃描完成！${validDateCount} 封符合日期，解析出 ${invoiceCount} 張發票，發現 ${matchingResults.length} 張號碼符合獎號。${attachmentErrors ? ` 有 ${attachmentErrors} 封郵件或附件讀取失敗。` : ''}${protectedCount ? ` 略過 ${protectedCount} 個有密碼的 PDF（通常是帳單，不是發票）。` : ''}${messages.length === MAX_SCAN_MESSAGES ? ' 已達掃描上限，可能還有未掃描郵件。' : ''}`);
 
     } catch (e: any) {
       console.error(e);
@@ -550,7 +552,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
                                         {item.check.isMatch ? (
                                             <span className="text-red-600 font-bold text-xs bg-red-100 px-2 py-1 rounded-full">{resultLabel(item.check)}</span>
                                         ) : (
-                                            <span className="text-gray-400 text-xs" title={item.check.description}>{item.msg.parsedNumber ? resultLabel(item.check) : item.msg.attachmentErrors ? '附件讀取失敗' : '未解析'}</span>
+                                            <span className="text-gray-400 text-xs" title={item.check.description}>{item.msg.parsedNumber ? resultLabel(item.check) : item.msg.attachmentErrors ? '附件讀取失敗' : item.msg.protectedAttachments ? '附件有密碼（非發票）' : '未解析'}</span>
                                         )}
                                     </td>
                                 </tr>

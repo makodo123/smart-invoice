@@ -3,10 +3,24 @@ import { extractInvoiceDateFromText, extractInvoiceNumbersFromText, type Invoice
 
 GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url).toString();
 
+export interface PdfInvoiceResult {
+  invoices: InvoiceNumber[];
+  invoiceDate?: string;
+  /** PDF 需要密碼才能開啟（例如電信、信用卡帳單），不是讀取失敗 */
+  passwordProtected?: boolean;
+}
+
 /** Read selectable text from a PDF in the browser. No PDF bytes are uploaded. */
-export const extractInvoicesFromPdf = async (bytes: Uint8Array): Promise<{ invoices: InvoiceNumber[]; invoiceDate?: string }> => {
+export const extractInvoicesFromPdf = async (bytes: Uint8Array): Promise<PdfInvoiceResult> => {
   const task = getDocument({ data: bytes });
-  const document = await task.promise;
+  let document;
+  try {
+    document = await task.promise;
+  } catch (error) {
+    await task.destroy();
+    if ((error as { name?: string })?.name === 'PasswordException') return { invoices: [], passwordProtected: true };
+    throw error;
+  }
   const invoices: InvoiceNumber[] = [];
   let invoiceDate: string | undefined;
   try {

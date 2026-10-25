@@ -136,6 +136,15 @@ describe('QR Code 與 Gmail 解析', () => {
     expect(extractInvoiceDateFromText('開立日期 115年07月01日')).toBe('2026/07/01');
     expect(extractInvoiceDateFromText('寄件日期 2026/07/01')).toBeUndefined();
   });
+
+  test('沒有日期標示時，讀取緊接在發票號碼後的日期（momo 格式）', () => {
+    expect(extractInvoiceDateFromText('115年 09-10月 EQ-32140849 2026-10-19 23:59:59 隨機碼：0009')).toBe('2026/10/19');
+    // 有標示的日期優先
+    expect(extractInvoiceDateFromText('AB12345678 2026-10-19 發票日期：2026/10/20')).toBe('2026/10/20');
+    // 號碼後面不是日期時不誤判
+    expect(extractInvoiceDateFromText('發票號碼 FQ58392856 隨機碼 8591')).toBeUndefined();
+    expect(extractInvoiceDateFromText('訂單 26101923260194 2026-10-19')).toBeUndefined();
+  });
 });
 
 describe('匯出 CSV', () => {
