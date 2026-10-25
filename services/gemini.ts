@@ -1,8 +1,33 @@
-import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
 import { WinningNumbers, InvoiceData } from '../types';
 
-// Initialize Gemini Client
-const getClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+const GEMINI_KEY_STORAGE = 'gemini_api_key';
+
+/**
+ * 金鑰來源：開發環境的 .env.local（正式版預設不打包進前端，避免金鑰外流），
+ * 或使用者在畫面上自行輸入、只存在自己瀏覽器的金鑰。
+ */
+export const getGeminiApiKey = (): string => {
+  const builtIn = (process.env.API_KEY || process.env.GEMINI_API_KEY || '').trim();
+  if (builtIn) return builtIn;
+  try {
+    return (localStorage.getItem(GEMINI_KEY_STORAGE) || '').trim();
+  } catch {
+    return '';
+  }
+};
+
+export const hasBuiltInGeminiApiKey = (): boolean =>
+  Boolean((process.env.API_KEY || process.env.GEMINI_API_KEY || '').trim());
+
+export const setUserGeminiApiKey = (key: string) => {
+  try {
+    if (key.trim()) localStorage.setItem(GEMINI_KEY_STORAGE, key.trim());
+    else localStorage.removeItem(GEMINI_KEY_STORAGE);
+  } catch (error) {
+    console.warn('Unable to save Gemini API key', error);
+  }
+};
+
 
 // Bump the key so an older cache (v5 could hold the built-in fallback marked as fresh) is not reused.
 const CACHE_KEY = 'invoice_winning_numbers_cache_v6';
@@ -107,7 +132,7 @@ const isWinningNumbers = (value: unknown): value is WinningNumbers => {
 
 const fetchText = async (url: string): Promise<string> => {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 4_000);
+  const timeout = window.setTimeout(() => controller.abort(), 6_000);
 
   try {
     const response = await fetch(url, { cache: 'no-store', signal: controller.signal });
@@ -116,6 +141,49 @@ const fetchText = async (url: string): Promise<string> => {
   } finally {
     window.clearTimeout(timeout);
   }
+};
+
+/** 解析官方 RSS，取最新 3 期；格式不符時丟出錯誤 */
+const parseWinningNumbersFeed = (xmlText: string): WinningNumbers[] => {
+  const xmlDoc = new DOMParser().parseFromString(xmlText, "text/xml");
+  const items = xmlDoc.querySelectorAll("item");
+  const results: WinningNumbers[] = [];
+  for (let i = 0; i < items.length && results.length < 3; i++) {
+    const item = items[i];
+    const title = item.querySelector("title")?.textContent || "";
+    const description = item.querySelector("description")?.textContent || "";
+    if (!title.includes("年") || !title.includes("月")) continue;
+
+    const periodClean = toPlainText(title).replace("統一發票中獎號碼單", "").trim();
+    const prizes = parsePrizeNumbers(description);
+
+    if (prizes['特別獎'].length > 0 && prizes['特獎'].length > 0 && prizes['頭獎'].length > 0) {
+      results.push({
+        period: periodClean,
+        specialPrize: prizes['特別獎'][0],
+        grandPrize: prizes['特獎'][0],
+        firstPrize: prizes['頭獎'],
+        additionalSixthPrize: prizes['增開六獎']
+      });
+    }
+  }
+  if (results.length === 0 || !results.every(isWinningNumbers)) throw new Error('Feed has no valid winning numbers');
+  return results;
+};
+
+/** 讀取先前下載的獎號（不論是否過期），讓畫面在連線更新前先能使用 */
+export const getCachedWinningNumbers = (): { data: WinningNumbers[]; fetchedAt: number | null } | null => {
+  try {
+    const cachedString = localStorage.getItem(CACHE_KEY);
+    if (!cachedString) return null;
+    const { timestamp, data } = JSON.parse(cachedString);
+    if (Array.isArray(data) && data.length > 0 && data.every(isWinningNumbers)) {
+      return { data, fetchedAt: typeof timestamp === 'number' ? timestamp : null };
+    }
+  } catch (error) {
+    console.warn('Cache read failed', error);
+  }
+  return null;
 };
 
 /**
@@ -150,68 +218,32 @@ export const fetchLatestWinningNumbers = async (forceRefresh = false): Promise<W
     `https://api.allorigins.win/raw?url=${encodeURIComponent(TARGET_URL)}&t=${Date.now()}`
   ];
 
-  for (const url of sourceUrls) {
-    try {
-      const xmlText = await fetchText(url);
-      const parser = new DOMParser();
-      const xmlDoc = parser.parseFromString(xmlText, "text/xml");
-      const items = xmlDoc.querySelectorAll("item");
-      if (items.length === 0) continue;
-
-      const results: WinningNumbers[] = [];
-      let count = 0;
-      for (let i = 0; i < items.length && count < 3; i++) {
-        const item = items[i];
-        const title = item.querySelector("title")?.textContent || "";
-        const description = item.querySelector("description")?.textContent || "";
-        if (!title.includes("年") || !title.includes("月")) continue;
-
-        const periodClean = toPlainText(title).replace("統一發票中獎號碼單", "").trim();
-        const prizes = parsePrizeNumbers(description);
-
-        if (prizes['特別獎'].length > 0 && prizes['特獎'].length > 0 && prizes['頭獎'].length > 0) {
-          results.push({
-            period: periodClean,
-            specialPrize: prizes['特別獎'][0],
-            grandPrize: prizes['特獎'][0],
-            firstPrize: prizes['頭獎'],
-            additionalSixthPrize: prizes['增開六獎']
-          });
-          count++;
-        }
+  // 同時向所有來源發出請求，採用最先回傳有效資料的一個，避免逐一等待逾時
+  try {
+    const results = await Promise.any(sourceUrls.map(async (url) => {
+      try {
+        return parseWinningNumbersFeed(await fetchText(url));
+      } catch (e) {
+        console.warn(`Source ${url} failed`, e);
+        throw e;
       }
-
-      if (results.length > 0 && results.every(isWinningNumbers)) {
-        const fetchedAt = Date.now();
-        localStorage.setItem(CACHE_KEY, JSON.stringify({ timestamp: fetchedAt, data: results }));
-        return { data: results, source: 'live', fetchedAt };
-      }
-    } catch (e) {
-      console.warn(`Source ${url} failed`, e);
-    }
+    }));
+    const fetchedAt = Date.now();
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ timestamp: fetchedAt, data: results }));
+    return { data: results, source: 'live', fetchedAt };
+  } catch {
+    // 全部來源失敗，往下改用快取或內建資料
   }
 
   // 所有來源都失敗：改用舊快取，並標記為離線資料
-  try {
-    const cachedString = localStorage.getItem(CACHE_KEY);
-    if (cachedString) {
-      const { timestamp, data } = JSON.parse(cachedString);
-      if (Array.isArray(data) && data.every(isWinningNumbers)) {
-        return { data, source: 'cache', fetchedAt: typeof timestamp === 'number' ? timestamp : null };
-      }
-    }
-  } catch (error) {
-    console.warn('Stale cache read failed', error);
-  }
+  const cached = getCachedWinningNumbers();
+  if (cached) return { data: cached.data, source: 'cache', fetchedAt: cached.fetchedAt };
 
   // 完全無快取：回傳內建獎號。不寫入快取，下次開啟時仍會重新嘗試所有來源。
   return { data: FALLBACK_WINNING_NUMBERS, source: 'fallback', fetchedAt: null };
 };
 
-export const hasGeminiApiKey = (): boolean => {
-  const key = process.env.API_KEY || process.env.GEMINI_API_KEY;
-  return Boolean(key && key.trim().length > 0);
-};
+export const hasGeminiApiKey = (): boolean => getGeminiApiKey().length > 0;
 
 /**
  * Analyzes an invoice image using Gemini Flash to extract structured data.
@@ -222,7 +254,9 @@ export const analyzeInvoice = async (base64Image: string, mimeType: string): Pro
     return null;
   }
 
-  const ai = getClient();
+  // 只有使用 AI 辨識時才載入 Gemini SDK，減少首次開啟的下載量
+  const { GoogleGenAI, ThinkingLevel, Type } = await import('@google/genai');
+  const ai = new GoogleGenAI({ apiKey: getGeminiApiKey() });
 
   try {
     const response = await ai.models.generateContent({

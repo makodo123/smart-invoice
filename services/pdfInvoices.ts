@@ -1,13 +1,14 @@
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { extractInvoiceNumbersFromText, type InvoiceNumber } from './gmail.ts';
+import { extractInvoiceDateFromText, extractInvoiceNumbersFromText, type InvoiceNumber } from './gmail.ts';
 
 GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url).toString();
 
 /** Read selectable text from a PDF in the browser. No PDF bytes are uploaded. */
-export const extractInvoiceNumbersFromPdf = async (bytes: Uint8Array): Promise<InvoiceNumber[]> => {
+export const extractInvoicesFromPdf = async (bytes: Uint8Array): Promise<{ invoices: InvoiceNumber[]; invoiceDate?: string }> => {
   const task = getDocument({ data: bytes });
   const document = await task.promise;
   const invoices: InvoiceNumber[] = [];
+  let invoiceDate: string | undefined;
   try {
     for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber++) {
       const page = await document.getPage(pageNumber);
@@ -26,10 +27,11 @@ export const extractInvoiceNumbersFromPdf = async (bytes: Uint8Array): Promise<I
         previousY = y;
       }
       invoices.push(...extractInvoiceNumbersFromText(layoutText));
+      invoiceDate ??= extractInvoiceDateFromText(layoutText);
       invoices.push(...extractInvoiceNumbersFromText(pieces.map(item => item.str).join(' ')));
     }
   } finally {
     await task.destroy();
   }
-  return [...new Map(invoices.map(invoice => [invoice.fullNumber, invoice])).values()];
+  return { invoices: [...new Map(invoices.map(invoice => [invoice.fullNumber, invoice])).values()], invoiceDate };
 };

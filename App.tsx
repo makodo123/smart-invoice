@@ -3,19 +3,22 @@ import WinningTable from './components/WinningTable';
 import CheckSection from './components/CheckSection';
 import GmailCheckSection from './components/GmailCheckSection';
 import { WinningNumbers } from './types';
-import { fetchLatestWinningNumbers, FALLBACK_WINNING_NUMBERS, WinningNumbersSource } from './services/gemini';
+import { fetchLatestWinningNumbers, getCachedWinningNumbers, hasGeminiApiKey, FALLBACK_WINNING_NUMBERS, WinningNumbersSource } from './services/gemini';
 
 const formatFetchedAt = (ts: number) =>
   new Date(ts).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 
 const App: React.FC = () => {
-  const [winningNumbersList, setWinningNumbersList] = useState<WinningNumbers[]>([]);
+  // 先顯示上次下載的獎號，連線更新完成後再替換，避免開啟時要等資料來源回應才能對獎
+  const [winningNumbersList, setWinningNumbersList] = useState<WinningNumbers[]>(() => getCachedWinningNumbers()?.data ?? []);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [offlineNotice, setOfflineNotice] = useState<{ source: Exclude<WinningNumbersSource, 'live'>; fetchedAt: number | null } | null>(null);
   const hasFetched = useRef(false);
+  const selectionRef = useRef({ list: winningNumbersList, index: selectedIndex });
+  selectionRef.current = { list: winningNumbersList, index: selectedIndex };
 
   const loadData = async (force: boolean = false) => {
     setLoading(true);
@@ -23,8 +26,11 @@ const App: React.FC = () => {
     setSuccessMessage(null);
     try {
       const { data, source, fetchedAt } = await fetchLatestWinningNumbers(force);
+      // 更新後保留使用者選取的期別（若新資料仍包含該期）
+      const selectedPeriod = selectionRef.current.list[selectionRef.current.index]?.period;
+      const keepIndex = selectedPeriod ? data.findIndex((item) => item.period === selectedPeriod) : -1;
       setWinningNumbersList(data);
-      setSelectedIndex(0);
+      setSelectedIndex(keepIndex >= 0 ? keepIndex : 0);
       setOfflineNotice(source === 'live' ? null : { source, fetchedAt });
       if (force && source === 'live') {
         setSuccessMessage(`已更新至最新資料（最新一期：${data[0].period}）。`);
@@ -78,6 +84,7 @@ const App: React.FC = () => {
               onClick={() => setSuccessMessage(null)}
               className="text-green-600 hover:text-green-800 text-sm font-semibold ml-4 p-1"
               title="關閉"
+              aria-label="關閉"
             >
               ✕
             </button>
@@ -119,6 +126,7 @@ const App: React.FC = () => {
               onClick={() => setError(null)}
               className="text-red-500 hover:text-red-700 text-sm font-semibold ml-4 p-1"
               title="關閉"
+              aria-label="關閉"
             >
               ✕
             </button>
@@ -135,14 +143,15 @@ const App: React.FC = () => {
         />
 
         {/* Manual & Camera Check */}
-        <CheckSection winningNumbersList={winningNumbersList} />
+        <CheckSection winningNumbersList={winningNumbersList} selectedIndex={selectedIndex} />
 
         {/* Gmail Check */}
         <GmailCheckSection winningNumbersList={winningNumbersList} selectedIndex={selectedIndex} />
         
         <footer className="text-center mt-12 text-gray-400 text-sm">
           <p>資料來源：財政部電子發票整合服務平台</p>
-          <p className="mt-1 text-xs">圖片辨識技術由 Google Gemini 提供</p>
+          <p className="mt-1 text-xs">中獎與否請以財政部公告為準</p>
+          {hasGeminiApiKey() && <p className="mt-1 text-xs">圖片辨識技術由 Google Gemini 提供</p>}
         </footer>
       </div>
     </div>

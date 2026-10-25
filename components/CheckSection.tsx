@@ -1,177 +1,168 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { WinningNumbers, CheckResult, PrizeType, HistoryItem, InvoiceData } from '../types';
-import { checkInvoice } from '../utils/checkLogic';
-import { analyzeInvoice, hasGeminiApiKey } from '../services/gemini';
+import { checkAgainstPeriods, pickBestResult, resultLabel } from '../utils/checkLogic';
+import { analyzeInvoice, hasGeminiApiKey, hasBuiltInGeminiApiKey, getGeminiApiKey, setUserGeminiApiKey } from '../services/gemini';
 import { compressImage } from '../utils/imageUtils';
 import { exportToCSV } from '../utils/export';
-import { getHistory, saveHistoryItem, saveHistoryList, clearHistory, saveInvoiceData, getInvoiceData, clearInvoiceData } from '../utils/storage';
+import {
+  getHistory, saveHistoryItem, upsertTypedHistoryItem, clearHistory, saveInvoiceData, getInvoiceData,
+  clearInvoiceData, STORAGE_CHANGE_EVENT,
+} from '../utils/storage';
 import { decodeQRFromImage, parseTaiwanInvoiceQR } from '../utils/qrScanner';
+import { getComparePeriods, isClaimExpired } from '../utils/period';
 import { QrScannerModal } from './QrScannerModal';
 
 interface Props {
-  winningNumbersList: WinningNumbers[]; 
+  winningNumbersList: WinningNumbers[];
+  selectedIndex: number;
 }
 
-const CheckSection: React.FC<Props> = ({ winningNumbersList }) => {
+type Notice = { tone: 'info' | 'warn' | 'error'; text: string };
+
+const NOTICE_STYLES: Record<Notice['tone'], string> = {
+  info: 'bg-blue-50 text-blue-800 border-blue-200',
+  warn: 'bg-amber-50 text-amber-800 border-amber-200',
+  error: 'bg-red-50 text-red-700 border-red-200',
+};
+
+const formatHistoryTime = (timestamp: number) =>
+  new Date(timestamp).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+
+const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) => {
   const [inputNum, setInputNum] = useState('');
-  const [result, setResult] = useState<CheckResult | null>(null);
+  const [results, setResults] = useState<CheckResult[]>([]);
   const [scannedData, setScannedData] = useState<InvoiceData | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [invoiceList, setInvoiceList] = useState<InvoiceData[]>([]);
+  const [history, setHistory] = useState<HistoryItem[]>(() => getHistory());
+  const [invoiceList, setInvoiceList] = useState<InvoiceData[]>(() => getInvoiceData());
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState(() => hasGeminiApiKey());
+  const [showAiSettings, setShowAiSettings] = useState(false);
+  const [aiKeyInput, setAiKeyInput] = useState(() => (hasBuiltInGeminiApiKey() ? '' : getGeminiApiKey()));
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const checkPeriods = winningNumbersList.slice(0, 2);
-  const hasApiKey = hasGeminiApiKey();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const comparePeriods = getComparePeriods(winningNumbersList, selectedIndex);
+  const isReady = winningNumbersList.length > 0;
+  const result = pickBestResult(results);
+  const otherResults = results.filter(item => item !== result);
 
+  // 歷史紀錄可能被 Gmail 區塊或其他分頁改動，統一從 localStorage 重新讀取
   useEffect(() => {
-    setHistory(getHistory());
-    setInvoiceList(getInvoiceData());
+    const reload = () => {
+      setHistory(getHistory());
+      setInvoiceList(getInvoiceData());
+    };
+    window.addEventListener(STORAGE_CHANGE_EVENT, reload);
+    window.addEventListener('storage', reload);
+    return () => {
+      window.removeEventListener(STORAGE_CHANGE_EVENT, reload);
+      window.removeEventListener('storage', reload);
+    };
   }, []);
 
-  const performCheck = (num: string): CheckResult => {
-    if (checkPeriods.length === 0) {
-        return { isMatch: false, prizeType: PrizeType.None, amount: 0 };
-    }
-
-    let bestResult: CheckResult | null = null;
-
-    for (let i = 0; i < checkPeriods.length; i++) {
-        const winning = checkPeriods[i];
-        const isCurrent = i === 0;
-        const res = checkInvoice(num, winning, isCurrent);
-
-        if (res.isMatch) {
-            if (!bestResult) {
-                bestResult = res;
-            } else {
-                const bestIsPartial = bestResult.isPartial || false;
-                const currentIsPartial = res.isPartial || false;
-
-                if (bestIsPartial && !currentIsPartial) {
-                     bestResult = res; 
-                } else if (!bestIsPartial && !currentIsPartial) {
-                     if ((res.amount || 0) > (bestResult.amount || 0)) {
-                         bestResult = res;
-                     }
-                }
-            }
-        }
-    }
-
-    if (bestResult) return bestResult;
-    return checkInvoice(num, checkPeriods[0], true);
-  };
-
+  // 獎號更新或切換期別時重新對獎
   useEffect(() => {
-    if (inputNum && inputNum.length >= 3 && checkPeriods.length > 0) {
-      const res = performCheck(inputNum);
-      setResult(res);
+    if (inputNum.length >= 3 && isReady) {
+      setResults(checkAgainstPeriods(inputNum, winningNumbersList, selectedIndex, scannedData?.date));
     }
-  }, [winningNumbersList]);
+  }, [winningNumbersList, selectedIndex]);
 
-  // Auto-save history when input changes (Debounced) - Only saves basic check history
+  // 手動輸入停頓後自動存入歷史紀錄（掃描結果在掃描時就已存檔）
   useEffect(() => {
-    if (!inputNum || inputNum.length < 3 || checkPeriods.length === 0) return;
+    if (scannedData || inputNum.length < 3 || !isReady) return;
 
     const timer = setTimeout(() => {
-       const res = performCheck(inputNum);
-       
-       setHistory(prevHistory => {
-         const lastItem = prevHistory[0];
-         let newHistory;
-
-         if (lastItem && inputNum.startsWith(lastItem.number) && inputNum.length > lastItem.number.length) {
-            const updatedItem = { ...lastItem, number: inputNum, result: res, timestamp: Date.now() };
-            newHistory = [updatedItem, ...prevHistory.slice(1)];
-         } else if (lastItem && lastItem.number === inputNum) {
-            return prevHistory;
-         } else {
-            const newItem: HistoryItem = { id: Date.now().toString(), number: inputNum, timestamp: Date.now(), result: res };
-            newHistory = [newItem, ...prevHistory].slice(0, 50);
-         }
-         
-         saveHistoryList(newHistory);
-         return newHistory;
-       });
-
-    }, 500); 
+      const best = pickBestResult(checkAgainstPeriods(inputNum, winningNumbersList, selectedIndex));
+      if (!best) return;
+      setHistory(upsertTypedHistoryItem({ id: `${Date.now()}`, number: inputNum, timestamp: Date.now(), result: best }));
+    }, 1000);
 
     return () => clearTimeout(timer);
-  }, [inputNum, winningNumbersList]);
-
-  const addToHistory = (num: string, res: CheckResult, details?: InvoiceData) => {
-    const newItem: HistoryItem = {
-      id: Date.now().toString(),
-      number: num,
-      timestamp: Date.now(),
-      result: res
-    };
-    const updatedHistory = saveHistoryItem(newItem);
-    setHistory(updatedHistory);
-
-    if (details) {
-      const updatedList = saveInvoiceData(details);
-      setInvoiceList(updatedList);
-    }
-  };
+  }, [inputNum, winningNumbersList, selectedIndex, scannedData]);
 
   const handleManualCheck = (num: string) => {
     setInputNum(num);
     setScannedData(null); // Clear scanned details on manual input
-    if (checkPeriods.length === 0) return;
-    
-    if (num.length >= 3) {
-      setResult(performCheck(num));
+    setNotice(null);
+    if (num.length >= 3 && isReady) {
+      setResults(checkAgainstPeriods(num, winningNumbersList, selectedIndex));
     } else {
-      setResult(null);
+      setResults([]);
     }
   };
 
+  // 按 Enter 後全選號碼，下一張直接輸入即可取代
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    inputRef.current?.select();
   };
 
-  const handleScanSuccess = (data: InvoiceData) => {
+  const clearInput = () => {
+    setInputNum('');
+    setResults([]);
+    setScannedData(null);
+    setNotice(null);
+    inputRef.current?.focus();
+  };
+
+  /** 掃描成功：依發票日期對獎並存檔，回傳結果給連續掃描清單 */
+  const handleScanSuccess = (data: InvoiceData): CheckResult | null => {
+    const checks = checkAgainstPeriods(data.invoiceNumber, winningNumbersList, selectedIndex, data.date);
+    const best = pickBestResult(checks);
     setInputNum(data.invoiceNumber);
     setScannedData(data);
-    const res = performCheck(data.invoiceNumber);
-    setResult(res);
-    addToHistory(data.invoiceNumber, res, data);
+    setResults(checks);
+    setNotice(null);
+    if (!best) return null;
+
+    setHistory(saveHistoryItem({ id: `${Date.now()}-${data.invoiceNumber}`, number: data.invoiceNumber, timestamp: Date.now(), result: best }));
+    setInvoiceList(saveInvoiceData({
+      ...data,
+      period: best.period,
+      prize: resultLabel(best),
+      prizeAmount: best.isMatch && !best.isPartial ? best.amount : 0,
+    }));
+    return best;
   };
 
-  const handleFallbackToAi = async (file: File) => {
-    if (!hasApiKey) return;
-    setIsScanning(true);
+  /** AI 圖片辨識；回傳 null 時 message 說明原因 */
+  const recognizeWithAi = async (file: File): Promise<{ result: CheckResult | null; message?: string }> => {
+    if (!hasApiKey) return { result: null, message: '未設定 Gemini API 金鑰，無法使用 AI 圖片辨識。' };
     try {
       const base64Data = await compressImage(file, 1024, 0.8);
       const data = await analyzeInvoice(base64Data, file.type);
-      if (data && data.invoiceNumber) {
-        handleScanSuccess(data);
-      } else {
-        alert("AI 圖片辨識未找到發票號碼，請手動輸入。");
-      }
+      if (data?.invoiceNumber) return { result: handleScanSuccess(data) };
+      return { result: null, message: 'AI 圖片辨識未找到發票號碼，請手動輸入。' };
     } catch (err) {
       console.error(err);
-      alert("AI 辨識失敗，請重試。");
-    } finally {
-      setIsScanning(false);
+      return { result: null, message: 'AI 辨識失敗，請重試或手動輸入。' };
     }
+  };
+
+  const handleFallbackToAi = async (file: File) => {
+    setIsScanning(true);
+    const { message } = await recognizeWithAi(file);
+    if (message) setNotice({ tone: 'warn', text: message });
+    setIsScanning(false);
+    return message ?? null;
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (checkPeriods.length === 0) {
-      alert("請先等待中獎號碼載入");
+    if (!isReady) {
+      setNotice({ tone: 'info', text: '請先等待中獎號碼載入。' });
       return;
     }
 
     setIsScanning(true);
-    setResult(null);
+    setResults([]);
     setScannedData(null);
     setInputNum('');
+    setNotice(null);
 
     try {
       // 1. 優先辨識電子發票 QR Code
@@ -182,37 +173,57 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList }) => {
           handleScanSuccess(parsed.data);
           return;
         } else if (parsed?.isRightSide) {
-          alert("偵測到電子發票右側明細條碼，請拍攝「左側」主要 QR Code 進行對獎。");
+          setNotice({ tone: 'warn', text: '偵測到電子發票右側明細條碼，請拍攝「左側」主要 QR Code 進行對獎。' });
           return;
         }
       }
 
-      // 2. 若無 QR Code：檢查是否有 Gemini API Key
+      // 2. 若無 QR Code：沒有金鑰就提示手動輸入
       if (!hasApiKey) {
-        alert("未在圖片中偵測到電子發票 QR Code。\n（因未設定 Gemini API 金鑰，不執行 AI 圖片解析，請手動輸入號碼或對準發票左側 QR Code 掃描）");
+        setNotice({ tone: 'warn', text: '未在圖片中偵測到電子發票 QR Code。請對準發票左側 QR Code 重拍，或直接輸入號碼。' });
         return;
       }
 
       // 3. 有 Gemini API Key 時進行 AI 備援辨識
-      const base64Data = await compressImage(file, 1024, 0.8);
-      const data = await analyzeInvoice(base64Data, file.type);
-      
-      if (data && data.invoiceNumber) {
-        handleScanSuccess(data);
-      } else {
-        setResult({ isMatch: false, prizeType: PrizeType.None, description: "無法辨識發票號碼，請手動輸入" });
-      }
+      const { message } = await recognizeWithAi(file);
+      if (message) setNotice({ tone: 'warn', text: message });
     } catch (err) {
       console.error(err);
-      alert("掃描失敗，請重試");
+      setNotice({ tone: 'error', text: '掃描失敗，請重試。' });
     } finally {
       setIsScanning(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
+  const handleClearAll = () => {
+    if (!confirmClear) {
+      setConfirmClear(true);
+      return;
+    }
+    clearHistory();
+    clearInvoiceData();
+    setHistory([]);
+    setInvoiceList([]);
+    setConfirmClear(false);
+  };
+
+  // 「確定清除？」幾秒內沒按就恢復
+  useEffect(() => {
+    if (!confirmClear) return;
+    const timer = setTimeout(() => setConfirmClear(false), 4000);
+    return () => clearTimeout(timer);
+  }, [confirmClear]);
+
+  const saveAiKey = () => {
+    setUserGeminiApiKey(aiKeyInput);
+    setHasApiKey(hasGeminiApiKey());
+    setShowAiSettings(false);
+  };
+
   const getResultColor = (res: CheckResult) => {
     if (res.isPartial) return 'bg-orange-100 text-orange-800 border-2 border-orange-300';
+    if (res.periodUnknown) return 'bg-slate-100 text-slate-700 border border-slate-200';
     switch (res.prizeType) {
       case PrizeType.Special:
       case PrizeType.Grand:
@@ -225,40 +236,53 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList }) => {
     }
   };
 
-  const formatTime = (timestamp: number) => {
-    return new Date(timestamp).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+  const resultHeadline = (res: CheckResult) => {
+    if (res.isPartial) return '⚠️ 注意！疑似中獎';
+    if (res.mayBeHigher) return `🎉 至少中${res.prizeType.split(' ')[0]}！`;
+    return '🎉 恭喜中獎！';
   };
 
   return (
     <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-      <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center">
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 text-indigo-600"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      <h3 className="text-xl font-bold text-gray-800 mb-2 flex items-center">
+        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 text-indigo-600"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
         快速對獎 & 記帳
       </h3>
+      {comparePeriods.length > 0 && (
+        <p className="text-xs text-gray-500 mb-4">
+          手動輸入比對：{comparePeriods.map(item => item.period).join('、')}（可在上方切換期別）；掃描發票則依發票日期自動選擇期別。
+        </p>
+      )}
 
       {/* Input Area */}
-      <div className="flex flex-col md:flex-row gap-3 mb-6">
+      <div className="flex flex-col md:flex-row gap-3 mb-3">
         <form onSubmit={handleManualSubmit} className="relative flex-grow">
           <input
-            type="tel"
+            ref={inputRef}
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            aria-label="發票號碼"
             value={inputNum}
             onChange={(e) => {
               const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 8);
               handleManualCheck(val);
             }}
+            onFocus={(e) => e.currentTarget.select()}
             placeholder="請輸入發票後 3 碼或全碼"
             className="w-full text-center text-3xl font-mono tracking-widest py-4 rounded-xl border-2 border-indigo-100 focus:border-indigo-500 focus:ring focus:ring-indigo-200 transition-all outline-none text-gray-700 placeholder:text-xl placeholder:text-gray-300"
-            disabled={winningNumbersList.length === 0 || isScanning}
+            disabled={!isReady || isScanning}
           />
           <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center space-x-2">
             {inputNum && (
-              <button 
+              <button
                 type="button"
-                onClick={() => { setInputNum(''); setResult(null); setScannedData(null); }}
+                onClick={clearInput}
                 className="text-gray-400 hover:text-gray-600 p-2"
                 title="清除輸入"
+                aria-label="清除輸入"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
               </button>
             )}
           </div>
@@ -268,127 +292,200 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList }) => {
           {/* Main QR Scanner Button */}
           <button
             onClick={() => setIsScannerOpen(true)}
-            disabled={winningNumbersList.length === 0 || isScanning}
+            disabled={!isReady || isScanning}
             className={`flex-1 md:flex-none flex items-center justify-center px-6 py-4 rounded-xl font-bold transition-all shadow-sm ${
-              isScanning 
+              isScanning
                 ? 'bg-gray-100 text-gray-400 cursor-wait'
                 : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95'
             }`}
             title="掃描電子發票 QR Code"
           >
             <span className="flex items-center whitespace-nowrap">
-              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
-              掃描發票 QR Code
+              <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
+              {isScanning ? '辨識中...' : '掃描發票 QR Code'}
             </span>
           </button>
 
           {/* Upload Photo Button */}
-          <input 
-            type="file" 
-            accept="image/*" 
-            className="hidden" 
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
             ref={fileInputRef}
             onChange={handleFileUpload}
           />
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={winningNumbersList.length === 0 || isScanning}
+            disabled={!isReady || isScanning}
             className="flex items-center justify-center px-4 py-4 rounded-xl font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 active:scale-95 transition-all border border-gray-200"
             title="選擇或拍攝發票照片"
+            aria-label="選擇或拍攝發票照片"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
           </button>
         </div>
       </div>
 
-      {/* Result Display */}
-      {result && (
-        <div className={`rounded-xl p-6 text-center transition-all duration-300 transform ${getResultColor(result)}`}>
-          {result.isMatch ? (
-            <div>
-               {result.period && (
-                   <div className="inline-block mb-3 px-3 py-1 rounded-full bg-black/20 text-white/90 text-sm font-bold backdrop-blur-sm">
-                       {result.period} {result.isCurrentPeriod ? '(當期)' : '(前一期)'}
-                   </div>
-               )}
-              <div className="text-3xl font-bold mb-2">
-                  {result.isPartial ? '⚠️ 注意！疑似中獎' : '🎉 恭喜中獎！'}
+      {/* AI 圖片辨識設定（正式版不內建金鑰時，使用者可填自己的金鑰） */}
+      {!hasBuiltInGeminiApiKey() && (
+        <div className="mb-4 text-xs text-gray-500">
+          <button type="button" onClick={() => setShowAiSettings(!showAiSettings)} className="underline hover:text-gray-700">
+            {hasApiKey ? 'AI 圖片辨識：已啟用（修改金鑰）' : '實體發票沒有 QR Code？設定 Gemini 金鑰啟用 AI 圖片辨識'}
+          </button>
+          {showAiSettings && (
+            <div className="mt-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+              <label htmlFor="gemini-key" className="block font-bold text-gray-700 mb-1">Gemini API 金鑰</label>
+              <div className="flex gap-2">
+                <input
+                  id="gemini-key"
+                  type="password"
+                  autoComplete="off"
+                  value={aiKeyInput}
+                  onChange={(e) => setAiKeyInput(e.target.value)}
+                  placeholder="AIza..."
+                  className="flex-grow p-2 border border-gray-300 rounded-lg text-sm outline-none focus:border-indigo-400"
+                />
+                <button type="button" onClick={saveAiKey} className="px-3 py-2 bg-indigo-600 text-white rounded-lg font-medium">
+                  儲存
+                </button>
               </div>
-              <div className="text-xl opacity-90">{result.prizeType}</div>
-              {result.matchedNumber && <div className="mt-4 font-mono font-bold bg-white/20 inline-block px-4 py-1 rounded">號碼：{result.matchedNumber}</div>}
-            </div>
-          ) : (
-            <div>
-              <div className="text-lg font-bold">😔 沒中獎</div>
-              <div className="text-sm mt-1">{result.description || "再接再厲，下一張會更好！"}</div>
-            </div>
-          )}
-          
-          {/* Scanned Details Info */}
-          {scannedData && (
-            <div className="mt-4 pt-4 border-t border-black/10 text-left bg-white/10 rounded p-3 text-sm">
-              <div className="flex justify-between items-center mb-1">
-                <span className="opacity-70">消費日期：</span>
-                <span className="font-medium">{scannedData.date || '無紀錄'}</span>
-              </div>
-              <div className="flex justify-between items-center mb-1">
-                <span className="opacity-70">商家/類型：</span>
-                <span className="font-medium">{scannedData.storeName || '電子發票'}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="opacity-70">消費金額：</span>
-                <span className="font-bold text-lg">{scannedData.amount ? `$${scannedData.amount}` : '無紀錄'}</span>
-              </div>
+              <p className="mt-1">金鑰只存在這個瀏覽器，辨識時圖片會直接傳給 Google Gemini。清空後儲存即可移除。</p>
             </div>
           )}
         </div>
       )}
+
+      {notice && (
+        <div className={`mb-4 p-3 rounded-lg border text-sm flex items-start justify-between gap-3 ${NOTICE_STYLES[notice.tone]}`} role="alert">
+          <span className="whitespace-pre-line">{notice.text}</span>
+          <button onClick={() => setNotice(null)} className="shrink-0 opacity-70 hover:opacity-100" aria-label="關閉提示">✕</button>
+        </div>
+      )}
+
+      {/* Result Display */}
+      <div aria-live="polite">
+        {result && (
+          <div className={`rounded-xl p-6 text-center transition-all duration-300 transform ${getResultColor(result)}`}>
+            {result.isMatch ? (
+              <div>
+                {result.period && (
+                  <div className="inline-block mb-3 px-3 py-1 rounded-full bg-black/20 text-white/90 text-sm font-bold backdrop-blur-sm">
+                    {result.period} {result.isCurrentPeriod ? '(最新一期)' : ''}
+                  </div>
+                )}
+                <div className="text-3xl font-bold mb-2">{resultHeadline(result)}</div>
+                <div className="text-xl opacity-90">{result.prizeType}</div>
+                {(result.isPartial || result.mayBeHigher) && result.description && (
+                  <div className="mt-2 text-sm font-medium">{result.description}</div>
+                )}
+                {result.matchedNumber && <div className="mt-4 font-mono font-bold bg-white/20 inline-block px-4 py-1 rounded">對照獎號：{result.matchedNumber}</div>}
+                {result.period && isClaimExpired(result.period) && (
+                  <div className="mt-3 text-sm font-bold bg-black/20 rounded px-3 py-1 inline-block">⚠️ 此期已超過領獎期限</div>
+                )}
+              </div>
+            ) : result.periodUnknown ? (
+              <div>
+                <div className="text-lg font-bold">🕒 無法對獎</div>
+                <div className="text-sm mt-1">{result.description}</div>
+              </div>
+            ) : (
+              <div>
+                <div className="text-lg font-bold">😔 沒中獎</div>
+                <div className="text-sm mt-1">
+                  {result.description || (results.length > 1 ? `${results.map(item => item.period).join('、')} 皆未中獎` : "再接再厲，下一張會更好！")}
+                </div>
+              </div>
+            )}
+
+            {/* 其他期別的結果 */}
+            {result.isMatch && otherResults.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-black/10 text-sm space-y-1">
+                {otherResults.map(item => (
+                  <div key={item.period} className="flex justify-between">
+                    <span className="opacity-80">{item.period}</span>
+                    <span className="font-medium">{resultLabel(item)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Scanned Details Info */}
+            {scannedData && (
+              <div className="mt-4 pt-4 border-t border-black/10 text-left bg-white/10 rounded p-3 text-sm">
+                {scannedData.fullNumber && (
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="opacity-70">發票號碼：</span>
+                    <span className="font-mono font-medium">{scannedData.fullNumber}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center mb-1">
+                  <span className="opacity-70">消費日期：</span>
+                  <span className="font-medium">{scannedData.date || '無紀錄'}</span>
+                </div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="opacity-70">{scannedData.storeName ? '商家：' : '賣方統編：'}</span>
+                  <span className="font-medium">{scannedData.storeName || scannedData.sellerId || '無紀錄'}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="opacity-70">消費金額：</span>
+                  <span className="font-bold text-lg">{scannedData.amount ? `$${scannedData.amount}` : '無紀錄'}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* History & Export */}
       {history.length > 0 && (
         <div className="mt-8 border-t border-gray-100 pt-6">
           <div className="flex justify-between items-center mb-4">
             <h4 className="font-bold text-gray-700 flex items-center">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 text-gray-500"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 text-gray-500"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
               歷史紀錄
             </h4>
-            <div className="flex gap-3">
+            <div className="flex gap-3 items-center">
               {invoiceList.length > 0 && (
-                <button 
-                  onClick={() => exportToCSV(invoiceList)} 
+                <button
+                  onClick={() => exportToCSV(invoiceList)}
                   className="text-xs bg-green-50 text-green-600 hover:bg-green-100 px-3 py-1 rounded transition-colors flex items-center"
+                  title="匯出掃描過的發票（CSV，可用 Excel 開啟）"
                 >
-                  <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                  匯出 Excel
+                  <svg aria-hidden="true" className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                  匯出 Excel ({invoiceList.length})
                 </button>
               )}
-              <button 
-                onClick={() => { clearHistory(); clearInvoiceData(); setHistory([]); setInvoiceList([]); }} 
-                className="text-xs text-gray-400 hover:text-red-500 transition-colors"
+              {confirmClear && (
+                <button onClick={() => setConfirmClear(false)} className="text-xs text-gray-500 hover:text-gray-700">取消</button>
+              )}
+              <button
+                onClick={handleClearAll}
+                className={`text-xs transition-colors ${confirmClear ? 'text-white bg-red-500 hover:bg-red-600 px-2 py-1 rounded font-bold' : 'text-gray-400 hover:text-red-500'}`}
               >
-                清除全部
+                {confirmClear ? '確定清除紀錄與記帳資料？' : '清除全部'}
               </button>
             </div>
           </div>
           <div className="space-y-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
             {history.map(item => (
               <div key={item.id} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg text-sm border border-transparent hover:border-gray-200 transition-colors">
-                  <div className="flex flex-col">
-                       <span className="font-mono font-medium text-gray-800 text-lg tracking-wider">{item.number}</span>
-                       <div className="flex items-center gap-2 mt-0.5">
-                           <span className="text-xs text-gray-400">{formatTime(item.timestamp)}</span>
-                       </div>
+                <div className="flex flex-col">
+                  <span className="font-mono font-medium text-gray-800 text-lg tracking-wider">{item.number}</span>
+                  <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
+                    <span>{formatHistoryTime(item.timestamp)}</span>
+                    {item.result.period && <span>· {item.result.period}</span>}
                   </div>
-                  <div>
-                      {item.result.isMatch ? (
-                           <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-sm ${item.result.isPartial ? 'bg-orange-100 text-orange-600' : 'bg-red-100 text-red-600'}`}>
-                               {item.result.isPartial ? '核對全碼' : item.result.prizeType.split(' ')[0]}
-                           </span>
-                      ) : (
-                           <span className="bg-gray-200 text-gray-500 px-3 py-1 rounded-full text-xs">未中獎</span>
-                      )}
-                  </div>
+                </div>
+                <div>
+                  {item.result.isMatch ? (
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-sm ${item.result.isPartial ? 'bg-orange-100 text-orange-600' : 'bg-red-100 text-red-600'}`}>
+                      {resultLabel(item.result)}
+                    </span>
+                  ) : (
+                    <span className="bg-gray-200 text-gray-500 px-3 py-1 rounded-full text-xs">{resultLabel(item.result)}</span>
+                  )}
+                </div>
               </div>
             ))}
           </div>

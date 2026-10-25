@@ -23,20 +23,21 @@ export const parseTaiwanInvoiceQR = (text: string): { data?: InvoiceData; isRigh
 
   // 台灣電子發票標準左側 QR Code（至少 77 碼）
   // 格式：[字軌2碼][號碼8碼][民國年月日7碼][隨機碼4碼][未稅銷售額16進位8碼][總額16進位8碼][買方統編8碼][賣方統編8碼]...
-  const invoiceRegex = /^([A-Za-z]{2})(\d{8})(\d{3})(\d{2})(\d{2})([0-9A-Za-z]{4})([0-9A-Fa-f]{8})([0-9A-Fa-f]{8})/;
+  const invoiceRegex = /^([A-Za-z]{2})(\d{8})(\d{3})(\d{2})(\d{2})([0-9A-Za-z]{4})([0-9A-Fa-f]{8})([0-9A-Fa-f]{8})(?:(\d{8})(\d{8}))?/;
   const match = raw.match(invoiceRegex);
 
   if (match) {
-    const [, prefix, num, rocYear, month, day, , , totalHex] = match;
+    const [, prefix, num, rocYear, month, day, , , totalHex, , sellerId] = match;
     const year = parseInt(rocYear, 10) + 1911;
     const amount = parseInt(totalHex, 16);
 
     return {
       data: {
         invoiceNumber: num,
+        fullNumber: `${prefix.toUpperCase()}${num}`,
         date: `${year}/${month}/${day}`,
         amount: isNaN(amount) ? 0 : amount,
-        storeName: `${prefix.toUpperCase()} 電子發票`
+        sellerId: sellerId && sellerId !== '00000000' ? sellerId : undefined,
       }
     };
   }
@@ -47,9 +48,9 @@ export const parseTaiwanInvoiceQR = (text: string): { data?: InvoiceData; isRigh
     return {
       data: {
         invoiceNumber: looseMatch[2],
+        fullNumber: `${looseMatch[1].toUpperCase()}${looseMatch[2]}`,
         date: '',
-        amount: 0,
-        storeName: `${looseMatch[1].toUpperCase()} 電子發票`
+        amount: 0
       }
     };
   }
@@ -61,8 +62,7 @@ export const parseTaiwanInvoiceQR = (text: string): { data?: InvoiceData; isRigh
       data: {
         invoiceNumber: numMatch[0],
         date: '',
-        amount: 0,
-        storeName: '電子發票'
+        amount: 0
       }
     };
   }

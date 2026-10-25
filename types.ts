@@ -27,6 +27,8 @@ export interface CheckResult {
   period?: string; // which period matched
   isCurrentPeriod?: boolean; // useful for UI highlighting
   isPartial?: boolean; // if true, it means it matches suffix of Special/Grand but needs full check
+  mayBeHigher?: boolean; // fewer than 8 digits entered and all of them match: a higher prize is still possible
+  periodUnknown?: boolean; // the invoice period could not be determined, so it was not checked
 }
 
 export interface HistoryItem {
@@ -38,8 +40,13 @@ export interface HistoryItem {
 
 export interface InvoiceData {
   invoiceNumber: string;
+  fullNumber?: string; // 含字軌，例如 AB12345678
   date: string; // YYYY/MM/DD
   amount: number;
   storeName?: string;
+  sellerId?: string; // 賣方統編
   details?: string; // Optional raw details
+  period?: string; // 對獎期別
+  prize?: string; // 對獎結果
+  prizeAmount?: number;
 }

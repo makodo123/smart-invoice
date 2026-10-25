@@ -1,5 +1,6 @@
 import React from 'react';
 import { WinningNumbers } from '../types';
+import { formatShortDate, getClaimWindow, isClaimExpired } from '../utils/period';
 
 interface Props {
   data: WinningNumbers | null;
@@ -11,6 +12,10 @@ interface Props {
 }
 
 const WinningTable: React.FC<Props> = ({ data, periods, selectedIndex, onSelectPeriod, loading, onRefresh }) => {
+  const claimWindow = data ? getClaimWindow(data.period) : null;
+  const expired = data ? isClaimExpired(data.period) : false;
+  const notYetClaimable = Boolean(claimWindow && new Date() < claimWindow.claimStart);
+
   return (
     <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 border border-gray-100 relative overflow-hidden transition-all hover:shadow-xl">
       <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
@@ -46,18 +51,21 @@ const WinningTable: React.FC<Props> = ({ data, periods, selectedIndex, onSelectP
       </div>
 
       {periods.length > 0 && (
-        <div className="flex space-x-2 mb-6 bg-gray-100 p-1.5 rounded-xl relative z-10">
+        <div className="flex space-x-2 mb-6 bg-gray-100 p-1.5 rounded-xl relative z-10 overflow-x-auto" role="tablist" aria-label="選擇期別">
           {periods.map((period, idx) => (
             <button
               key={idx}
+              role="tab"
+              aria-selected={selectedIndex === idx}
               onClick={() => onSelectPeriod(idx)}
-              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all duration-200 ${
+              className={`flex-1 min-w-0 whitespace-nowrap py-2 px-1 text-xs sm:text-sm font-bold rounded-lg transition-all duration-200 ${
                 selectedIndex === idx 
                   ? 'bg-white text-indigo-600 shadow-sm transform scale-[1.02]' 
                   : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
               }`}
             >
               {period}
+              {isClaimExpired(period) && <span className="block text-[10px] font-medium text-gray-400">已過領獎期限</span>}
             </button>
           ))}
         </div>
@@ -71,7 +79,14 @@ const WinningTable: React.FC<Props> = ({ data, periods, selectedIndex, onSelectP
 
       {data && (
         <div className="space-y-4 relative z-10 animate-fade-in">
-          <p className="text-xs text-gray-500">離線或來源異常時可能顯示備援期別；對獎請以財政部公告為準。</p>
+          {claimWindow && (
+            <div className={`text-xs rounded-lg px-3 py-2 ${expired ? 'bg-gray-100 text-gray-500' : 'bg-indigo-50 text-indigo-700'}`}>
+              <span className="font-bold">領獎期間：</span>
+              {formatShortDate(claimWindow.claimStart)} ～ {formatShortDate(claimWindow.claimEnd)}
+              {expired && <span className="ml-2 font-bold text-red-500">已過領獎期限</span>}
+              {notYetClaimable && <span className="ml-2">（{formatShortDate(claimWindow.claimStart)} 起開始領獎）</span>}
+            </div>
+          )}
           {/* Special Prize */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-4 border-b border-gray-100 pb-4">
             <div className="text-gray-500 font-medium md:col-span-1 flex items-center">

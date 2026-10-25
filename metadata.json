@@ -1,6 +1,6 @@
 {
   "name": "Smart Invoice Winner",
-  "description": "A smart Taiwan Uniform Invoice redemption app that uses AI to fetch the latest winning numbers and scan receipts.",
+  "description": "A Taiwan Uniform Invoice checker: official winning numbers, live QR Code scanning, Gmail e-invoice scanning, and optional Gemini image recognition.",
   "requestFramePermissions": [
     "camera"
   ]
