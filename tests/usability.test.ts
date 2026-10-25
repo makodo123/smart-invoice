@@ -187,3 +187,62 @@ describe('歷史紀錄儲存', () => {
     expect(getInvoiceData()).toHaveLength(1);
   });
 });
+
+describe('新一期開獎後重新對獎歷史紀錄', async () => {
+  const { recheckHistory } = await import('../utils/historyRecheck');
+  const SEP_OCT: WinningNumbers = {
+    period: '115年 09~10月',
+    specialPrize: '11112222',
+    grandPrize: '33334444',
+    firstPrize: ['55556666', '77778888', '99990000'],
+    additionalSixthPrize: [],
+  };
+  const NEW_LIST = [SEP_OCT, ...LIST];
+  const oct1 = new Date(2026, 9, 1, 12).getTime();
+
+  test('掃描時尚未開獎的發票，開獎後依發票日期重新對獎', () => {
+    const [unknown] = checkAgainstPeriods('12346666', LIST, 0, '2026/09/10');
+    const item = { id: '1', number: '12346666', timestamp: oct1, result: unknown, source: 'scan' as const, invoiceDate: '2026/09/10' };
+
+    expect(recheckHistory([item], LIST).dirty).toBe(false);
+
+    const { history, changed } = recheckHistory([item], NEW_LIST, 99);
+    expect(changed).toHaveLength(1);
+    expect(history[0].result).toMatchObject({ period: SEP_OCT.period, prizeType: PrizeType.Fifth, isMatch: true });
+    expect(history[0].recheckedAt).toBe(99);
+  });
+
+  test('手動輸入時尚未開獎的期別，開獎後補比對', () => {
+    const checks = checkAgainstPeriods('888', LIST, 0);
+    const item = {
+      id: '2', number: '888', timestamp: oct1, result: pickBestResult(checks)!, source: 'manual' as const,
+      checkedPeriods: checks.map(r => r.period!),
+    };
+    expect(item.result.isMatch).toBe(false);
+
+    const { history, changed } = recheckHistory([item], NEW_LIST);
+    expect(changed).toHaveLength(1);
+    expect(history[0].result).toMatchObject({ period: SEP_OCT.period, prizeType: PrizeType.Sixth, mayBeHigher: true });
+    expect(history[0].checkedPeriods).toContain(SEP_OCT.period);
+
+    // 再跑一次不會重複處理
+    expect(recheckHistory(history, NEW_LIST).dirty).toBe(false);
+  });
+
+  test('輸入時期別還沒開始，或新結果一樣是未中獎，都不標示有新結果', () => {
+    const aug1 = new Date(2026, 7, 1).getTime();
+    const early = { id: '3', number: '888', timestamp: aug1, result: checkInvoice('888', JUL_AUG), source: 'manual' as const, checkedPeriods: [JUL_AUG.period] };
+    expect(recheckHistory([early], NEW_LIST).dirty).toBe(false);
+
+    const noWin = { id: '4', number: '123', timestamp: oct1, result: checkInvoice('123', JUL_AUG), source: 'manual' as const, checkedPeriods: [JUL_AUG.period] };
+    const outcome = recheckHistory([noWin], NEW_LIST);
+    expect(outcome.changed).toHaveLength(0);
+    expect(outcome.history[0].result).toBe(noWin.result);
+    expect(outcome.history[0].checkedPeriods).toContain(SEP_OCT.period);
+  });
+
+  test('Gmail 紀錄已依日期確定期別，不重新對獎', () => {
+    const item = { id: '5', number: '55556666', timestamp: oct1, result: checkInvoice('55556666', JUL_AUG), source: 'gmail' as const };
+    expect(recheckHistory([item], NEW_LIST).dirty).toBe(false);
+  });
+});

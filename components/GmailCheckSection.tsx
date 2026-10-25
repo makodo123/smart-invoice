@@ -255,7 +255,9 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
                 id: `${Date.now()}-${Math.random()}`,
                 number: invoice.parsedNumber,
                 timestamp: emailTs,
-                result: bestResult
+                result: bestResult,
+                source: 'gmail',
+                invoiceDate: details.invoiceDate,
               });
             }
             scanLog.push({ msg: invoiceMsg, check: bestResult });

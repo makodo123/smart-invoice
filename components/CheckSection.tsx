@@ -6,8 +6,9 @@ import { compressImage } from '../utils/imageUtils';
 import { exportToCSV } from '../utils/export';
 import {
   getHistory, saveHistoryItem, upsertTypedHistoryItem, clearHistory, saveInvoiceData, getInvoiceData,
-  clearInvoiceData, STORAGE_CHANGE_EVENT,
+  clearInvoiceData, saveHistoryList, updateInvoiceResults, STORAGE_CHANGE_EVENT,
 } from '../utils/storage';
+import { recheckHistory } from '../utils/historyRecheck';
 import { decodeQRFromImage, parseTaiwanInvoiceQR } from '../utils/qrScanner';
 import { getComparePeriods, isClaimExpired } from '../utils/period';
 import { QrScannerModal } from './QrScannerModal';
@@ -62,6 +63,32 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
     };
   }, []);
 
+  // 新一期開獎（獎號更新）後，替歷史紀錄中當時尚未開獎的發票重新對獎
+  useEffect(() => {
+    if (!isReady) return;
+    const { history: updated, changed, dirty } = recheckHistory(getHistory(), winningNumbersList);
+    if (!dirty) return;
+    saveHistoryList(updated);
+    setHistory(updated);
+    updateInvoiceResults(changed.filter(item => item.invoiceDate).map(item => ({
+      invoiceNumber: item.number,
+      date: item.invoiceDate!,
+      period: item.result.period,
+      prize: resultLabel(item.result),
+      prizeAmount: item.result.isMatch && !item.result.isPartial ? item.result.amount : 0,
+    })));
+    if (changed.length > 0) {
+      const winners = changed.filter(item => item.result.isMatch);
+      setNotice({
+        tone: winners.length > 0 ? 'warn' : 'info',
+        text: `新一期獎號已公布，已為 ${changed.length} 筆歷史紀錄重新對獎` +
+          (winners.length > 0
+            ? `，其中 ${winners.length} 張中獎或疑似中獎：${winners.slice(0, 3).map(item => `${item.number}（${resultLabel(item.result)}）`).join('、')}${winners.length > 3 ? ' 等' : ''}。`
+            : '，皆未中獎。'),
+      });
+    }
+  }, [winningNumbersList]);
+
   // 獎號更新或切換期別時重新對獎
   useEffect(() => {
     if (inputNum.length >= 3 && isReady) {
@@ -74,9 +101,13 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
     if (scannedData || inputNum.length < 3 || !isReady) return;
 
     const timer = setTimeout(() => {
-      const best = pickBestResult(checkAgainstPeriods(inputNum, winningNumbersList, selectedIndex));
+      const checks = checkAgainstPeriods(inputNum, winningNumbersList, selectedIndex);
+      const best = pickBestResult(checks);
       if (!best) return;
-      setHistory(upsertTypedHistoryItem({ id: `${Date.now()}`, number: inputNum, timestamp: Date.now(), result: best }));
+      setHistory(upsertTypedHistoryItem({
+        id: `${Date.now()}`, number: inputNum, timestamp: Date.now(), result: best,
+        source: 'manual', checkedPeriods: checks.flatMap(item => (item.period ? [item.period] : [])),
+      }));
     }, 1000);
 
     return () => clearTimeout(timer);
@@ -117,7 +148,11 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
     setNotice(null);
     if (!best) return null;
 
-    setHistory(saveHistoryItem({ id: `${Date.now()}-${data.invoiceNumber}`, number: data.invoiceNumber, timestamp: Date.now(), result: best }));
+    setHistory(saveHistoryItem({
+      id: `${Date.now()}-${data.invoiceNumber}`, number: data.invoiceNumber, timestamp: Date.now(), result: best,
+      source: 'scan', invoiceDate: data.date || undefined,
+      checkedPeriods: checks.flatMap(item => (item.period ? [item.period] : [])),
+    }));
     setInvoiceList(saveInvoiceData({
       ...data,
       period: best.period,
@@ -469,15 +504,18 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
           </div>
           <div className="space-y-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
             {history.map(item => (
-              <div key={item.id} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg text-sm border border-transparent hover:border-gray-200 transition-colors">
-                <div className="flex flex-col">
+              <div key={item.id} className="flex justify-between items-center gap-3 bg-gray-50 p-3 rounded-lg text-sm border border-transparent hover:border-gray-200 transition-colors">
+                <div className="flex flex-col min-w-0">
                   <span className="font-mono font-medium text-gray-800 text-lg tracking-wider">{item.number}</span>
                   <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
                     <span>{formatHistoryTime(item.timestamp)}</span>
                     {item.result.period && <span>· {item.result.period}</span>}
                   </div>
+                  {item.recheckedAt && (
+                    <span className="text-xs text-indigo-500 mt-0.5">新一期開獎後已重新對獎（{formatHistoryTime(item.recheckedAt)}）</span>
+                  )}
                 </div>
-                <div>
+                <div className="shrink-0 whitespace-nowrap">
                   {item.result.isMatch ? (
                     <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-sm ${item.result.isPartial ? 'bg-orange-100 text-orange-600' : 'bg-red-100 text-red-600'}`}>
                       {resultLabel(item.result)}

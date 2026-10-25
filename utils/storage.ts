@@ -95,6 +95,20 @@ export const saveInvoiceData = (item: InvoiceData): InvoiceData[] => {
   return newList;
 };
 
+/** 重新對獎後更新記帳資料中的期別與結果（以號碼＋日期對應） */
+export const updateInvoiceResults = (updates: Pick<InvoiceData, 'invoiceNumber' | 'date' | 'period' | 'prize' | 'prizeAmount'>[]) => {
+  if (updates.length === 0) return;
+  const list = getInvoiceData();
+  let changed = false;
+  const newList = list.map(item => {
+    const update = updates.find(u => u.invoiceNumber === item.invoiceNumber && u.date === item.date);
+    if (!update) return item;
+    changed = true;
+    return { ...item, period: update.period, prize: update.prize, prizeAmount: update.prizeAmount };
+  });
+  if (changed) writeList(DATA_KEY, newList);
+};
+
 export const clearInvoiceData = () => {
   localStorage.removeItem(DATA_KEY);
   notifyChange();

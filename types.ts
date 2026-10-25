@@ -36,6 +36,10 @@ export interface HistoryItem {
   number: string;
   timestamp: number;
   result: CheckResult;
+  source?: 'manual' | 'scan' | 'gmail';
+  invoiceDate?: string; // YYYY/MM/DD，掃描時取得，用來在開獎後重新對獎
+  checkedPeriods?: string[]; // 已比對過的期別
+  recheckedAt?: number; // 新一期開獎後自動重新對獎、結果有變動的時間
 }
 
 export interface InvoiceData {
