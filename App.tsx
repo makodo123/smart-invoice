@@ -154,7 +154,7 @@ const App: React.FC = () => {
         <footer className="text-center mt-12 text-gray-400 text-sm">
           <p>資料來源：財政部電子發票整合服務平台</p>
           <p className="mt-1 text-xs">中獎與否請以財政部公告為準</p>
-          <p className="mt-3 text-xs text-gray-500">小提醒：在手機瀏覽器的選單選「加到主畫面」，下次對獎一點就能開。</p>
+          <p className="mt-3 text-xs text-gray-500">小提醒：在手機瀏覽器的選單選「加到主畫面」，下次對獎一點就能開；沒有網路時也能用上次下載的獎號對獎。</p>
           {hasGeminiApiKey() && <p className="mt-1 text-xs">圖片辨識技術由 Google Gemini 提供</p>}
         </footer>
       </div>

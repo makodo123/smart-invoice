@@ -173,6 +173,7 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
   /** AI 圖片辨識；回傳 null 時 message 說明原因 */
   const recognizeWithAi = async (file: File): Promise<{ result: CheckResult | null; message?: string }> => {
     if (!hasApiKey) return { result: null, message: '未設定 Gemini API 金鑰，無法使用 AI 圖片辨識。' };
+    if (!navigator.onLine) return { result: null, message: '目前離線，AI 圖片辨識需要網路。請改掃描 QR Code 或直接輸入號碼。' };
     try {
       const base64Data = await compressImage(file, 1024, 0.8);
       const data = await analyzeInvoice(base64Data, file.type);

@@ -3,6 +3,7 @@ import { WinningNumbers, CheckResult, PrizeType, HistoryItem } from '../types';
 import { checkInvoice, pickBestResult, resultLabel } from '../utils/checkLogic';
 import { addHistoryItems } from '../utils/storage';
 import { initTokenClient, requestAccessToken, revokeAccessToken, fetchInvoiceEmails, fetchMessageDetails, GmailMessage, GmailAuthError } from '../services/gmail';
+import { useOnline } from '../utils/useOnline';
 import { findCandidatePeriodIndexes, findPeriodIndexForDate, getComparePeriods, parseInvoiceDate, parsePeriod } from '../utils/period';
 
 interface Props {
@@ -31,6 +32,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
   const [notConfigured, setNotConfigured] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const online = useOnline();
 
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
 
@@ -431,11 +433,18 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
       <p className="-mt-2 mb-1 text-xs text-gray-500">只在你按下掃描後讀取最多 {MAX_SCAN_MESSAGES} 封符合條件的信件；內容只在你的瀏覽器中處理，不會傳送到其他伺服器。</p>
       <p className="mb-3 text-xs text-gray-500">提醒：存在手機條碼載具的雲端發票中獎時，財政部會主動通知，也可以設定自動匯款，不一定要自己去領。</p>
 
+      {!online && (
+        <p className="mb-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3" role="status">
+          目前離線，Gmail 對獎需要網路。輸入號碼和掃描 QR Code 仍可使用。
+        </p>
+      )}
+
       {!isLoggedIn ? (
          <button
             onClick={handleLoginClick}
+            disabled={!online}
             aria-label="連結 Gmail 並自動對獎"
-            className="w-full bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 font-bold py-3.5 px-4 rounded-xl flex items-center justify-center transition-all shadow-sm hover:shadow-md active:scale-[0.99]"
+            className="w-full bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 font-bold py-3.5 px-4 rounded-xl flex items-center justify-center transition-all shadow-sm hover:shadow-md active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
          >
             <svg aria-hidden="true" className="w-5 h-5 mr-3" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
             連結 Gmail 並自動對獎
@@ -449,7 +458,8 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
             {!isScanning && (
                <button
                   onClick={startScanning}
-                  className="w-full bg-red-600 text-white hover:bg-red-700 font-bold py-3.5 px-4 rounded-xl transition-all shadow-md active:scale-[0.99] flex items-center justify-center"
+                  disabled={!online}
+                  className="w-full bg-red-600 text-white hover:bg-red-700 font-bold py-3.5 px-4 rounded-xl transition-all shadow-md active:scale-[0.99] flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
                >
                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16l5 5"/><path d="M21 21v-5h-5"/></svg>
                   掃描 Gmail 發票
