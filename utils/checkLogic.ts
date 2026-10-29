@@ -66,7 +66,7 @@ const checkFirstPrizeTiers = (num: string, winning: WinningNumbers, baseResult: 
       matchedNumber: bestFirst,
       mayBeHigher,
       description: mayBeHigher
-        ? `與頭獎末 ${bestLength} 碼相同，至少${PRIZE_NAME[prizeType]}；請輸入完整 8 碼確認是否中更高獎項`
+        ? '輸入完整 8 碼，可確認是否中更高獎項'
         : `與頭獎末 ${bestLength} 碼相同`,
     };
   }
@@ -92,7 +92,7 @@ export const checkInvoice = (userNumber: string, winning: WinningNumbers, isCurr
   const baseResult: BaseResult = { period: winning.period, isCurrentPeriod };
 
   if (num.length < 3) {
-    return { ...baseResult, isMatch: false, prizeType: PrizeType.None, amount: 0, description: "請輸入至少後 3 碼" };
+    return { ...baseResult, isMatch: false, prizeType: PrizeType.None, amount: 0, description: "請輸入至少末 3 碼" };
   }
 
   const tierResult = checkFirstPrizeTiers(num, winning, baseResult);
@@ -116,7 +116,7 @@ export const checkInvoice = (userNumber: string, winning: WinningNumbers, isCurr
         prizeType,
         amount: 0,
         matchedNumber: prizeNumber,
-        description: `與${name}末碼相同，請核對 8 碼${guaranteedNote}`,
+        description: `${name}要 8 碼全部相同才中獎，目前只有末 ${num.length} 碼相同。請輸入完整號碼確認。${guaranteedNote}`,
       };
     }
   }

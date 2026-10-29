@@ -6,6 +6,7 @@ import {
 import { parseTaiwanInvoiceQR } from '../utils/qrScanner';
 import { extractInvoiceDateFromText, extractInvoiceNumbersFromMessage } from '../services/gmail';
 import { buildInvoiceCSV } from '../utils/export';
+import { estimateNetPrize } from '../utils/prize';
 import { PrizeType, WinningNumbers } from '../types';
 
 const JUL_AUG: WinningNumbers = {
@@ -43,6 +44,16 @@ describe('部分號碼對獎', () => {
   test('輸入 5 碼全部相同：至少四獎；第 5 碼不同則確定為五獎', () => {
     expect(checkInvoice('48835', JUL_AUG)).toMatchObject({ prizeType: PrizeType.Fourth, mayBeHigher: true });
     expect(checkInvoice('18835', JUL_AUG)).toMatchObject({ prizeType: PrizeType.Fifth, mayBeHigher: false });
+  });
+
+  test('至少中獎時只提示輸入完整號碼，不重複獎項名稱', () => {
+    expect(checkInvoice('835', JUL_AUG).description).toBe('輸入完整 8 碼，可確認是否中更高獎項');
+  });
+
+  test('疑似特別獎時說明要 8 碼全部相同才中獎', () => {
+    const r = checkInvoice('565', JUL_AUG);
+    expect(r).toMatchObject({ prizeType: PrizeType.Special, isPartial: true, amount: 0 });
+    expect(r.description).toBe('特別獎要 8 碼全部相同才中獎，目前只有末 3 碼相同。請輸入完整號碼確認。');
   });
 
   test('完整 8 碼不會標示可能更高', () => {
@@ -168,6 +179,19 @@ describe('Google Payments 發票信', () => {
   });
 });
 
+describe('預估實拿獎金', () => {
+  test('與常見公告金額一致（超過 5,000 元扣 20% 所得稅，4,000 元以上扣 0.4% 印花稅）', () => {
+    expect(estimateNetPrize(10_000_000).net).toBe(7_960_000);
+    expect(estimateNetPrize(2_000_000).net).toBe(1_592_000);
+    expect(estimateNetPrize(200_000)).toEqual({ gross: 200_000, incomeTax: 40_000, stampTax: 800, net: 159_200 });
+    expect(estimateNetPrize(40_000).net).toBe(31_840);
+    expect(estimateNetPrize(10_000).net).toBe(7_960);
+    expect(estimateNetPrize(4_000)).toEqual({ gross: 4_000, incomeTax: 0, stampTax: 16, net: 3_984 });
+    expect(estimateNetPrize(1_000).net).toBe(1_000);
+    expect(estimateNetPrize(200).net).toBe(200);
+  });
+});
+
 describe('匯出 CSV', () => {
   test('包含字軌號碼、統編、對獎期別與結果，並保留開頭的 0', () => {
     const csv = buildInvoiceCSV([{
@@ -210,7 +234,14 @@ describe('歷史紀錄儲存', () => {
     expect(getHistory().map(h => h.number)).toEqual(['999', '123']);
   });
 
-  test('同一張發票重複掃描只保留一筆記帳資料', async () => {
+  test('刪除單筆紀錄不影響其他紀錄', async () => {
+    const { addHistoryItems, removeHistoryItem, getHistory } = await import('../utils/storage');
+    addHistoryItems([item('111', 1), item('222', 2), item('333', 3)]);
+    removeHistoryItem('222-2');
+    expect(getHistory().map(h => h.number)).toEqual(['111', '333']);
+  });
+
+  test('同一張發票重複掃描只保留一筆資料', async () => {
     const { saveInvoiceData, getInvoiceData } = await import('../utils/storage');
     saveInvoiceData({ invoiceNumber: '12345678', fullNumber: 'AB12345678', date: '2026/07/05', amount: 1 });
     saveInvoiceData({ invoiceNumber: '12345678', fullNumber: 'AB12345678', date: '2026/07/05', amount: 1 });

@@ -64,7 +64,7 @@ const App: React.FC = () => {
           <h1 className="text-3xl md:text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 mb-2">
             統一發票智能對獎
           </h1>
-          <p className="text-gray-500 font-medium">財政部獎號資料 • QR Code 對獎 • Gmail 掃描</p>
+          <p className="text-gray-500 font-medium">輸入號碼 • 掃描 QR Code • Gmail 自動對獎</p>
         </header>
 
         {successMessage && (
@@ -133,17 +133,20 @@ const App: React.FC = () => {
           </div>
         )}
 
-        <WinningTable 
-          data={currentWinningNumbers} 
-          periods={periods}
-          selectedIndex={selectedIndex}
-          onSelectPeriod={setSelectedIndex}
-          loading={loading} 
-          onRefresh={() => loadData(true)}
-        />
 
-        {/* Manual & Camera Check */}
+        {/* 最常用的對獎放最上面，手機上不用先捲過整張獎號表 */}
         <CheckSection winningNumbersList={winningNumbersList} selectedIndex={selectedIndex} />
+
+        <div className="mt-6">
+          <WinningTable 
+            data={currentWinningNumbers} 
+            periods={periods}
+            selectedIndex={selectedIndex}
+            onSelectPeriod={setSelectedIndex}
+            loading={loading} 
+            onRefresh={() => loadData(true)}
+          />
+        </div>
 
         {/* Gmail Check */}
         <GmailCheckSection winningNumbersList={winningNumbersList} selectedIndex={selectedIndex} />
@@ -151,6 +154,7 @@ const App: React.FC = () => {
         <footer className="text-center mt-12 text-gray-400 text-sm">
           <p>資料來源：財政部電子發票整合服務平台</p>
           <p className="mt-1 text-xs">中獎與否請以財政部公告為準</p>
+          <p className="mt-3 text-xs text-gray-500">小提醒：在手機瀏覽器的選單選「加到主畫面」，下次對獎一點就能開。</p>
           {hasGeminiApiKey() && <p className="mt-1 text-xs">圖片辨識技術由 Google Gemini 提供</p>}
         </footer>
       </div>

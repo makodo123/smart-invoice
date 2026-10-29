@@ -71,6 +71,13 @@ export const upsertTypedHistoryItem = (item: HistoryItem, editWindowMs = 10_000)
   return newHistory;
 };
 
+/** 刪除單筆歷史紀錄 */
+export const removeHistoryItem = (id: string): HistoryItem[] => {
+  const newHistory = getHistory().filter(item => item.id !== id);
+  saveHistoryList(newHistory);
+  return newHistory;
+};
+
 export const saveHistoryList = (list: HistoryItem[]) => {
   writeList(KEY, list);
 };

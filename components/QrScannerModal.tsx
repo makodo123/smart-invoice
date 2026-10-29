@@ -380,7 +380,7 @@ export const QrScannerModal: React.FC<Props> = ({
           </div>
 
           <div className="text-center text-xs text-gray-500 mt-1">
-            提示：電子發票有左右兩個 QR Code，掃描「左側」條碼即可自動對獎與記帳
+            提示：電子發票有左右兩個 QR Code，掃描「左側」條碼即可自動對獎
           </div>
         </div>
       </div>

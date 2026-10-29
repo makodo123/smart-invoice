@@ -126,32 +126,33 @@ const WinningTable: React.FC<Props> = ({ data, periods, selectedIndex, onSelectP
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-4 border-b border-gray-100 pb-4">
             <div className="text-gray-500 font-medium md:col-span-1 pt-1">
               其他獎項
+              <div className="text-xs font-normal text-gray-400 mt-0.5">比對上方 3 組頭獎號碼</div>
             </div>
             <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm text-gray-600">
                <div className="flex items-center">
                   <span className="inline-block w-8 font-bold text-gray-700">二獎</span>
                   <span className="bg-gray-100 px-2 py-0.5 rounded text-xs mx-2">4萬元</span>
-                  <span className="text-gray-400 text-xs">末 7 碼相同</span>
+                  <span className="text-gray-400 text-xs">與頭獎末 7 碼相同</span>
                </div>
                <div className="flex items-center">
                   <span className="inline-block w-8 font-bold text-gray-700">三獎</span>
                   <span className="bg-gray-100 px-2 py-0.5 rounded text-xs mx-2">1萬元</span>
-                  <span className="text-gray-400 text-xs">末 6 碼相同</span>
+                  <span className="text-gray-400 text-xs">與頭獎末 6 碼相同</span>
                </div>
                <div className="flex items-center">
                   <span className="inline-block w-8 font-bold text-gray-700">四獎</span>
                   <span className="bg-gray-100 px-2 py-0.5 rounded text-xs mx-2">4千元</span>
-                  <span className="text-gray-400 text-xs">末 5 碼相同</span>
+                  <span className="text-gray-400 text-xs">與頭獎末 5 碼相同</span>
                </div>
                <div className="flex items-center">
                   <span className="inline-block w-8 font-bold text-gray-700">五獎</span>
                   <span className="bg-gray-100 px-2 py-0.5 rounded text-xs mx-2">1千元</span>
-                  <span className="text-gray-400 text-xs">末 4 碼相同</span>
+                  <span className="text-gray-400 text-xs">與頭獎末 4 碼相同</span>
                </div>
                <div className="flex items-center">
                   <span className="inline-block w-8 font-bold text-gray-700">六獎</span>
                   <span className="bg-gray-100 px-2 py-0.5 rounded text-xs mx-2">200元</span>
-                  <span className="text-gray-400 text-xs">末 3 碼相同</span>
+                  <span className="text-gray-400 text-xs">與頭獎末 3 碼相同</span>
                </div>
             </div>
           </div>

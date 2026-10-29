@@ -203,7 +203,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
         return;
       }
 
-      setScanProgress(`找到 ${messages.length} 封相關郵件，開始過濾與解析...`);
+      setScanProgress(`找到 ${messages.length} 封相關郵件，開始讀取發票...`);
       
       let processed = 0;
       let validDateCount = 0;
@@ -275,7 +275,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
       // 寫入前重新讀取歷史紀錄，不會覆蓋掃描期間手動對獎的紀錄
       addHistoryItems(newHistoryItems);
 
-      setScanProgress(`掃描完成！${validDateCount} 封符合日期，解析出 ${invoiceCount} 張發票，發現 ${matchingResults.length} 張號碼符合獎號。${attachmentErrors ? ` 有 ${attachmentErrors} 封郵件或附件讀取失敗。` : ''}${protectedCount ? ` 略過 ${protectedCount} 個有密碼的 PDF（通常是帳單，不是發票）。` : ''}${messages.length === MAX_SCAN_MESSAGES ? ' 已達掃描上限，可能還有未掃描郵件。' : ''}`);
+      setScanProgress(`掃描完成！讀了 ${validDateCount} 封信，找到 ${invoiceCount} 張發票，其中 ${matchingResults.length} 張中獎或疑似中獎。${attachmentErrors ? ` 有 ${attachmentErrors} 封郵件或附件讀取失敗。` : ''}${protectedCount ? ` 略過 ${protectedCount} 個有密碼的 PDF（通常是帳單，不是發票）。` : ''}${messages.length === MAX_SCAN_MESSAGES ? ' 已達掃描上限，可能還有未掃描郵件。' : ''}`);
 
     } catch (e: any) {
       console.error(e);
@@ -307,7 +307,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
       <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
         <h3 className="text-xl font-bold text-gray-800 flex items-center">
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 text-red-500"><path d="M21.2 8.4c.5.38.8.97.8 1.6v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V10a2 2 0 0 1 .8-1.6l8-6a2 2 0 0 1 2.4 0l8 6Z"/><path d="m22 10-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 10"/></svg>
-          Gmail 自動兌獎
+          Gmail 自動對獎
         </h3>
         
         <button
@@ -323,7 +323,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
 
       {notConfigured && !needsConfig && (
         <p className="mb-4 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg p-3">
-          此網站尚未啟用 Gmail 登入（站長需設定 Google OAuth Client ID）。你仍可使用上方的手動輸入或 QR Code 對獎。
+          此網站尚未開放 Gmail 對獎。你仍可使用上方的輸入號碼或掃描 QR Code 對獎。
         </p>
       )}
 
@@ -428,21 +428,22 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
           className="w-full bg-white p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-red-100 focus:border-red-400 outline-none"
         />
       </details>
-      <p className="-mt-2 mb-3 text-xs text-gray-500">只在你按下掃描後讀取最多 {MAX_SCAN_MESSAGES} 封符合條件的信件；內容只在你的瀏覽器中處理，不會傳送到其他伺服器。</p>
+      <p className="-mt-2 mb-1 text-xs text-gray-500">只在你按下掃描後讀取最多 {MAX_SCAN_MESSAGES} 封符合條件的信件；內容只在你的瀏覽器中處理，不會傳送到其他伺服器。</p>
+      <p className="mb-3 text-xs text-gray-500">提醒：存在手機條碼載具的雲端發票中獎時，財政部會主動通知，也可以設定自動匯款，不一定要自己去領。</p>
 
       {!isLoggedIn ? (
          <button
             onClick={handleLoginClick}
-            aria-label="連結 Gmail 並自動兌獎"
+            aria-label="連結 Gmail 並自動對獎"
             className="w-full bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 font-bold py-3.5 px-4 rounded-xl flex items-center justify-center transition-all shadow-sm hover:shadow-md active:scale-[0.99]"
          >
             <svg aria-hidden="true" className="w-5 h-5 mr-3" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
-            連結 Gmail 並自動兌獎
+            連結 Gmail 並自動對獎
          </button>
       ) : (
          <div>
             <div className="mb-3 flex items-center justify-between gap-3 text-xs text-gray-500">
-              <span>已授權唯讀存取 Gmail，權杖只保留在本次瀏覽器工作階段。</span>
+              <span>已授權唯讀讀取 Gmail。授權只在這次開啟網頁時有效，約 1 小時後需重新連結。</span>
               <button onClick={handleDisconnect} className="shrink-0 text-red-600 hover:text-red-700 underline">中斷連線</button>
             </div>
             {!isScanning && (
@@ -563,7 +564,7 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
             </div>
             {scannedCount > 0 && results.length === 0 && (
                  <div className="mt-2 text-center text-xs text-gray-400">
-                     已掃描 {scannedCount} 封符合日期的郵件，未發現中獎發票
+                     已讀取 {scannedCount} 封信，沒有中獎的發票
                  </div>
             )}
         </div>
