@@ -20,13 +20,15 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # 排隊等候的執行要從最新的 main 開始，才能接在前一次的更新後面推送
           ref: main
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
+          # 這個工作有寫入 repo 的權限，又不需要安裝套件，關閉快取
+          package-manager-cache: false
       - name: Fetch official RSS
         run: node scripts/update-invoice-feed.mjs
       - name: Commit changed snapshot
