@@ -2,8 +2,16 @@ name: Update official invoice feed
 
 on:
   schedule:
+    # 每天台灣時間 14:20（UTC 06:20）；GitHub 排程常延遲數小時
     - cron: '20 6 * * *'
+    # 開獎日（單數月 25 日）台灣時間 14:10～22:10 每小時再抓一次，號碼公布後盡快更新
+    - cron: '10 6-14 25 1,3,5,7,9,11 *'
   workflow_dispatch:
+
+# 開獎日排程較密，若前一次延遲還沒跑完，下一次排隊等候，避免同時推送互相衝突
+concurrency:
+  group: update-invoice-feed
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -13,6 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 排隊等候的執行要從最新的 main 開始，才能接在前一次的更新後面推送
+          ref: main
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
