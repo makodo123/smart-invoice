@@ -77,6 +77,8 @@ Gmail 掃描只會在使用者按下授權與掃描後執行，使用 `gmail.rea
 npm test
 ```
 
+推上 `main` 或開 PR 時，GitHub Actions（`.github/workflows/ci.yml`）會自動執行型別檢查、`npm test` 與正式版打包，失敗時會收到 GitHub 通知。
+
 `tests/checkLogic.test.ts` 以 6 期財政部真實開獎號碼（`tests/fixtures/` 的固定快照）測試對獎邏輯，將 `checkInvoice` 的結果與依官方給獎規則獨立實作的比對函式核對，共 24,132 組：
 
 | 項目 | 組數 |

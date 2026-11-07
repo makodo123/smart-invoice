@@ -1,0 +1,35 @@
+name: CI
+
+# 推上 main 或開 PR 時，自動跑型別檢查、測試與正式版打包；任何一步失敗 GitHub 都會通知
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 只讀取程式碼，不會修改 repo
+permissions:
+  contents: read
+
+# 同一分支連續推送時，只保留最新一次的檢查
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Unit tests
+        run: npm test
+      - name: Production build
+        run: npm run build
