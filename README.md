@@ -77,6 +77,8 @@ Gmail 掃描只會在使用者按下授權與掃描後執行，使用 `gmail.rea
 npm test
 ```
 
+`tests/ui/` 是畫面測試（Vitest + Testing Library + jsdom），模擬使用者輸入號碼、點按鈕、切換期別，檢查畫面上的對獎結果、領獎說明、歷史紀錄、Gmail 與 QR 掃描視窗的文字與狀態；測試固定今天的日期，領獎期限的判斷不會隨時間改變。
+
 推上 `main` 或開 PR 時，GitHub Actions（`.github/workflows/ci.yml`）會自動執行型別檢查、`npm test` 與正式版打包，失敗時會收到 GitHub 通知。
 
 `tests/checkLogic.test.ts` 以 6 期財政部真實開獎號碼（`tests/fixtures/` 的固定快照）測試對獎邏輯，將 `checkInvoice` 的結果與依官方給獎規則獨立實作的比對函式核對，共 24,132 組：
