@@ -70,6 +70,15 @@ describe('獎號表', () => {
     }
   });
 
+  test('沒有增開六獎時不顯示這一行，有號碼時才顯示', () => {
+    renderTable();
+    expect(screen.queryByText('增開六獎')).not.toBeInTheDocument();
+    cleanup();
+    renderTable({ data: { ...LIST[0], additionalSixthPrize: ['123'] } });
+    expect(screen.getByText('增開六獎')).toBeInTheDocument();
+    expect(screen.getByText('123')).toBeInTheDocument();
+  });
+
   test('更新中時按鈕停用', () => {
     const { onRefresh } = renderTable({ loading: true });
     const button = screen.getByRole('button', { name: '更新中' });

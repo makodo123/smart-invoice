@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, test } from 'vitest';
 import { checkAgainstPeriods, checkInvoice, pickBestResult, resultLabel } from '../utils/checkLogic';
 import {
-  findCandidatePeriodIndexes, findPeriodIndexForDate, getClaimWindow, getComparePeriods, isClaimExpired, parseInvoiceDate,
+  findCandidatePeriodIndexes, findPeriodIndexForDate, getClaimWindow, getComparePeriods, isClaimExpired, nextPeriodAfter,
+  parseInvoiceDate, periodOfDate,
 } from '../utils/period';
 import { parseTaiwanInvoiceQR } from '../utils/qrScanner';
 import { extractInvoiceDateFromText, extractInvoiceNumbersFromMessage } from '../services/gmail';
@@ -79,10 +80,10 @@ describe('依期別對獎', () => {
     expect(jul[0]).toMatchObject({ period: JUL_AUG.period, prizeType: PrizeType.First });
   });
 
-  test('發票期別尚未開獎時標示期別不明', () => {
+  test('發票期別尚未開獎時標示期別不明，並說明開獎日', () => {
     const r = checkAgainstPeriods('54348835', LIST, 0, '2026/09/10');
     expect(r[0]).toMatchObject({ isMatch: false, periodUnknown: true });
-    expect(r[0].description).toContain('尚未開獎');
+    expect(r[0].description).toContain('屬於 115年 09~10月，尚未開獎，將於 11/25 開獎');
   });
 
   test('手動輸入比對選取的期別與前一期，各自回傳結果', () => {
@@ -112,6 +113,29 @@ describe('依期別對獎', () => {
     expect(parseInvoiceDate('2026年7月1日')?.getDate()).toBe(1);
     expect(parseInvoiceDate('2026/02/30')).toBeNull();
     expect(findPeriodIndexForDate(new Date(2026, 7, 31), LIST)).toBe(0);
+  });
+});
+
+describe('下一期與開獎日', () => {
+  test('最新一期之後的下一期', () => {
+    const next = nextPeriodAfter('115年 07~08月')!;
+    expect(next.period).toBe('115年 09~10月');
+    expect(next.monthsLabel).toBe('9–10 月');
+    expect([next.drawDate.getFullYear(), next.drawDate.getMonth(), next.drawDate.getDate()]).toEqual([2026, 10, 25]);
+  });
+
+  test('11–12 月期之後跨年到 1–2 月期', () => {
+    const next = nextPeriodAfter('114年 11~12月')!;
+    expect(next.period).toBe('115年 01~02月');
+    expect([next.drawDate.getFullYear(), next.drawDate.getMonth(), next.drawDate.getDate()]).toEqual([2026, 2, 25]);
+  });
+
+  test('發票日期所屬的期別與開獎日', () => {
+    expect(periodOfDate(new Date(2026, 9, 10)).period).toBe('115年 09~10月');
+    expect(periodOfDate(new Date(2026, 8, 1)).period).toBe('115年 09~10月');
+    const dec = periodOfDate(new Date(2026, 11, 31));
+    expect(dec.period).toBe('115年 11~12月');
+    expect([dec.drawDate.getFullYear(), dec.drawDate.getMonth(), dec.drawDate.getDate()]).toEqual([2027, 0, 25]);
   });
 });
 

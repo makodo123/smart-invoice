@@ -3,7 +3,8 @@ import '@testing-library/jest-dom/vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import CheckSection from '../../components/CheckSection';
-import { LIST } from './fixtures';
+import { checkInvoice } from '../../utils/checkLogic';
+import { LIST, MAY_JUN } from './fixtures';
 
 /** 輸入號碼（與使用者在輸入框打字相同，會觸發 onChange） */
 const typeNumber = (value: string) => {
@@ -152,5 +153,84 @@ describe('歷史紀錄', () => {
     fireEvent.click(screen.getByRole('button', { name: '清除全部' }));
     fireEvent.click(screen.getByRole('button', { name: '確定清除所有紀錄與掃描的發票？' }));
     expect(screen.queryByText('歷史紀錄')).not.toBeInTheDocument();
+  });
+});
+
+describe('連續對末 3 碼', () => {
+  const quickCheckbox = () => screen.getByRole('checkbox', { name: /連續對末 3 碼/ });
+
+  test('每滿 3 碼就對獎並記錄，下一個數字從新號碼開始', () => {
+    renderSection();
+    fireEvent.click(quickCheckbox());
+    const input = screen.getByLabelText('發票號碼');
+    expect(input).toHaveAttribute('placeholder', '連續輸入末 3 碼');
+
+    typeNumber('835');
+    expect(screen.getByText('🎉 至少中六獎！')).toBeInTheDocument();
+    const caption = () => screen.getByText((_, element) => element?.tagName === 'P' && /^末 3 碼 \d+ 的結果/.test(element.textContent ?? ''));
+    expect(caption()).toHaveTextContent('末 3 碼 835 的結果');
+
+    // 接著打下一張的第一個數字：不會黏成 8351，上一張的結果保留
+    typeNumber('8351');
+    expect(input).toHaveValue('1');
+    expect(caption()).toHaveTextContent('末 3 碼 835 的結果（正在輸入下一張）');
+    expect(screen.getByText('🎉 至少中六獎！')).toBeInTheDocument();
+
+    typeNumber('123');
+    expect(input).toHaveValue('123');
+    expect(screen.getByText('😔 沒中獎')).toBeInTheDocument();
+
+    // 不用等待，兩張都已記錄
+    expect(screen.getByRole('button', { name: '刪除 835 這筆紀錄' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '刪除 123 這筆紀錄' })).toBeInTheDocument();
+  });
+
+  test('貼上完整號碼時只取末 3 碼', () => {
+    renderSection();
+    fireEvent.click(quickCheckbox());
+    typeNumber('54348835');
+    expect(screen.getByLabelText('發票號碼')).toHaveValue('835');
+  });
+
+  test('設定會記住', () => {
+    renderSection();
+    fireEvent.click(quickCheckbox());
+    cleanup();
+    renderSection();
+    expect(quickCheckbox()).toBeChecked();
+  });
+});
+
+describe('尚未開獎的下一期', () => {
+  test('顯示下一期的開獎日，沒中獎時提醒該期發票要等開獎', () => {
+    renderSection();
+    expect(screen.getByText('下一期 115年 09~10月 將於 11/25 開獎。')).toBeInTheDocument();
+    typeNumber('12345678');
+    expect(screen.getByText('😔 沒中獎')).toBeInTheDocument();
+    expect(screen.getByText(/9–10 月的發票請等 11\/25 開獎後再對/)).toBeInTheDocument();
+  });
+
+  test('開獎日已過但還沒更新獎號：提示按更新號碼', () => {
+    vi.setSystemTime(new Date(2026, 10, 26, 9, 0));
+    renderSection();
+    expect(screen.getByText('115年 09~10月 已於 11/25 開獎，請按下方「更新號碼」取得最新獎號。')).toBeInTheDocument();
+  });
+});
+
+describe('已過領獎期限', () => {
+  test('比對說明標出已截止的期別', () => {
+    vi.setSystemTime(new Date(2026, 10, 7, 12, 0));
+    renderSection();
+    expect(screen.getByText(/115年 07~08月 和 115年 05~06月（已過領獎期限）/)).toBeInTheDocument();
+  });
+
+  test('歷史紀錄中已過期的中獎標示「已過期」', () => {
+    vi.setSystemTime(new Date(2026, 10, 7, 12, 0));
+    const win = checkInvoice('24121106', MAY_JUN);
+    localStorage.setItem('invoice_history', JSON.stringify([
+      { id: 'old', number: '24121106', timestamp: new Date(2026, 6, 1).getTime(), result: win, source: 'gmail' },
+    ]));
+    renderSection();
+    expect(screen.getByText('頭獎（已過期）')).toBeInTheDocument();
   });
 });

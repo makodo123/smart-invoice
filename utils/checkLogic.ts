@@ -1,5 +1,5 @@
 import { WinningNumbers, PrizeType, CheckResult } from '../types';
-import { findPeriodIndexForDate, getComparePeriods, parseInvoiceDate, parsePeriod } from './period';
+import { findPeriodIndexForDate, formatMonthDay, getComparePeriods, parseInvoiceDate, parsePeriod, periodOfDate } from './period';
 
 const getPrizeAmount = (type: PrizeType): number => {
   switch (type) {
@@ -180,7 +180,7 @@ export const checkAgainstPeriods = (
       amount: 0,
       periodUnknown: true,
       description: notDrawnYet
-        ? `這張發票（${invoiceDate}）所屬期別尚未開獎，請於開獎後再對獎。`
+        ? `這張發票（${invoiceDate}）屬於 ${periodOfDate(date).period}，尚未開獎，將於 ${formatMonthDay(periodOfDate(date).drawDate)} 開獎。開獎後網站會自動幫這張發票重新對獎。`
         : `這張發票（${invoiceDate}）的期別不在目前的獎號資料中，可能已超過領獎期限。`,
     }];
   }

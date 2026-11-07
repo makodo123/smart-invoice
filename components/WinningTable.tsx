@@ -157,22 +157,20 @@ const WinningTable: React.FC<Props> = ({ data, periods, selectedIndex, onSelectP
             </div>
           </div>
 
-          {/* Additional Sixth Prize */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-4">
-             <div className="text-gray-500 font-medium md:col-span-1 flex items-center">
-              <span className="bg-blue-100 text-blue-600 px-2.5 py-1 rounded text-xs mr-2 font-bold min-w-[60px] text-center">200元</span>
-              增開六獎
-            </div>
-            <div className="text-xl font-mono font-medium text-gray-800 md:col-span-2 flex flex-wrap gap-4 pl-2 md:pl-0">
-              {data.additionalSixthPrize && data.additionalSixthPrize.length > 0 ? (
-                data.additionalSixthPrize.map((num, idx) => (
+          {/* 增開六獎：近年已不再增開，有號碼時才顯示 */}
+          {data.additionalSixthPrize && data.additionalSixthPrize.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-4">
+              <div className="text-gray-500 font-medium md:col-span-1 flex items-center">
+                <span className="bg-blue-100 text-blue-600 px-2.5 py-1 rounded text-xs mr-2 font-bold min-w-[60px] text-center">200元</span>
+                增開六獎
+              </div>
+              <div className="text-xl font-mono font-medium text-gray-800 md:col-span-2 flex flex-wrap gap-4 pl-2 md:pl-0">
+                {data.additionalSixthPrize.map((num, idx) => (
                   <span key={idx} className="tracking-widest">{num}</span>
-                ))
-              ) : (
-                <span className="text-gray-400 text-sm">本期無增開</span>
-              )}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
     </div>

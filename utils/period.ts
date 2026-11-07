@@ -96,3 +96,37 @@ export const isClaimExpired = (period: string, now: Date = new Date()): boolean 
 
 export const formatShortDate = (date: Date): string =>
   `${date.getFullYear() - 1911}/${date.getMonth() + 1}/${date.getDate()}`;
+
+const formatPeriodLabel = (year: number, startMonth: number) =>
+  `${year - 1911}年 ${String(startMonth).padStart(2, '0')}~${String(startMonth + 1).padStart(2, '0')}月`;
+
+export interface UpcomingPeriod {
+  /** 例如「115年 09~10月」 */
+  period: string;
+  /** 例如「9–10 月」，用在說明文字 */
+  monthsLabel: string;
+  drawDate: Date;
+}
+
+const toUpcoming = (year: number, startMonth: number): UpcomingPeriod => ({
+  period: formatPeriodLabel(year, startMonth),
+  monthsLabel: `${startMonth}–${startMonth + 1} 月`,
+  // 期別結束後的次月 25 日開獎（11~12 月期在隔年 1 月）
+  drawDate: new Date(year, startMonth + 1, 25),
+});
+
+/** 發票日期所屬的期別（單數月開始、每兩個月一期）與開獎日 */
+export const periodOfDate = (date: Date): UpcomingPeriod => {
+  const month = date.getMonth() + 1;
+  return toUpcoming(date.getFullYear(), month % 2 === 1 ? month : month - 1);
+};
+
+/** 已公布的最新一期之後的下一期（尚未開獎） */
+export const nextPeriodAfter = (latestPeriod: string): UpcomingPeriod | null => {
+  const range = parsePeriod(latestPeriod);
+  if (!range) return null;
+  const nextStart = new Date(range.year, range.endMonth, 1);
+  return toUpcoming(nextStart.getFullYear(), nextStart.getMonth() + 1);
+};
+
+export const formatMonthDay = (date: Date): string => `${date.getMonth() + 1}/${date.getDate()}`;

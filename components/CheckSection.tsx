@@ -11,7 +11,7 @@ import {
 import { estimateNetPrize, OFFICIAL_CLAIM_INFO_URL } from '../utils/prize';
 import { recheckHistory } from '../utils/historyRecheck';
 import { decodeQRFromImage, parseTaiwanInvoiceQR } from '../utils/qrScanner';
-import { formatShortDate, getClaimWindow, getComparePeriods, isClaimExpired } from '../utils/period';
+import { formatMonthDay, formatShortDate, getClaimWindow, getComparePeriods, isClaimExpired, nextPeriodAfter } from '../utils/period';
 import { QrScannerModal } from './QrScannerModal';
 
 interface Props {
@@ -32,11 +32,32 @@ const GEMINI_KEY_HELP_URL = 'https://aistudio.google.com/apikey';
 const isBigPrize = (res: CheckResult) =>
   !res.isPartial && [PrizeType.Special, PrizeType.Grand, PrizeType.First].includes(res.prizeType);
 
+const QUICK_MODE_KEY = 'quick3_mode';
+
+const readQuickMode = () => {
+  try {
+    return localStorage.getItem(QUICK_MODE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * 連續對末 3 碼：已有 3 碼時再輸入，就從新號碼開始；貼上較長的號碼時取最後 3 碼。
+ */
+export const nextQuickValue = (previous: string, typed: string): string => {
+  const fresh = previous.length === 3 && typed.length > 3 && typed.startsWith(previous) ? typed.slice(3) : typed;
+  return fresh.slice(-3);
+};
+
 const formatHistoryTime = (timestamp: number) =>
   new Date(timestamp).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 
 const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) => {
   const [inputNum, setInputNum] = useState('');
+  // 目前畫面上的對獎結果屬於哪個號碼（連續對末 3 碼時，輸入下一張的途中仍顯示上一張的結果）
+  const [checkedNumber, setCheckedNumber] = useState('');
+  const [quickMode, setQuickMode] = useState(readQuickMode);
   const [results, setResults] = useState<CheckResult[]>([]);
   const [scannedData, setScannedData] = useState<InvoiceData | null>(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -56,6 +77,8 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
   const result = pickBestResult(results);
   const otherResults = results.filter(item => item !== result);
   const visibleHistory = winsOnly ? history.filter(item => item.result.isMatch) : history;
+  const upcoming = isReady ? nextPeriodAfter(winningNumbersList[0].period) : null;
+  const upcomingNotDrawn = Boolean(upcoming && new Date() < upcoming.drawDate);
 
   // 歷史紀錄可能被 Gmail 區塊或其他分頁改動，統一從 localStorage 重新讀取
   useEffect(() => {
@@ -99,37 +122,58 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
 
   // 獎號更新或切換期別時重新對獎
   useEffect(() => {
-    if (inputNum.length >= 3 && isReady) {
-      setResults(checkAgainstPeriods(inputNum, winningNumbersList, selectedIndex, scannedData?.date));
+    if (checkedNumber.length >= 3 && isReady) {
+      setResults(checkAgainstPeriods(checkedNumber, winningNumbersList, selectedIndex, scannedData?.date));
     }
   }, [winningNumbersList, selectedIndex]);
 
-  // 手動輸入停頓後自動存入歷史紀錄（掃描結果在掃描時就已存檔）
+  const saveTypedNumber = (num: string, checks: CheckResult[]) => {
+    const best = pickBestResult(checks);
+    if (!best) return;
+    setHistory(upsertTypedHistoryItem({
+      id: `${Date.now()}`, number: num, timestamp: Date.now(), result: best,
+      source: 'manual', checkedPeriods: checks.flatMap(item => (item.period ? [item.period] : [])),
+    }));
+  };
+
+  // 手動輸入停頓後自動存入歷史紀錄（掃描結果在掃描時就已存檔；連續對末 3 碼時每滿 3 碼就存）
   useEffect(() => {
-    if (scannedData || inputNum.length < 3 || !isReady) return;
+    if (quickMode || scannedData || inputNum.length < 3 || !isReady) return;
 
     const timer = setTimeout(() => {
-      const checks = checkAgainstPeriods(inputNum, winningNumbersList, selectedIndex);
-      const best = pickBestResult(checks);
-      if (!best) return;
-      setHistory(upsertTypedHistoryItem({
-        id: `${Date.now()}`, number: inputNum, timestamp: Date.now(), result: best,
-        source: 'manual', checkedPeriods: checks.flatMap(item => (item.period ? [item.period] : [])),
-      }));
+      saveTypedNumber(inputNum, checkAgainstPeriods(inputNum, winningNumbersList, selectedIndex));
     }, 1000);
 
     return () => clearTimeout(timer);
-  }, [inputNum, winningNumbersList, selectedIndex, scannedData]);
+  }, [inputNum, winningNumbersList, selectedIndex, scannedData, quickMode]);
 
   const handleManualCheck = (num: string) => {
     setInputNum(num);
     setScannedData(null); // Clear scanned details on manual input
     setNotice(null);
     if (num.length >= 3 && isReady) {
-      setResults(checkAgainstPeriods(num, winningNumbersList, selectedIndex));
-    } else {
+      const checks = checkAgainstPeriods(num, winningNumbersList, selectedIndex);
+      setResults(checks);
+      setCheckedNumber(num);
+      if (quickMode) saveTypedNumber(num, checks);
+    } else if (!quickMode) {
+      // 連續對末 3 碼時，輸入下一張的途中保留上一張的結果
       setResults([]);
+      setCheckedNumber('');
     }
+  };
+
+  const toggleQuickMode = () => {
+    const next = !quickMode;
+    setQuickMode(next);
+    try {
+      localStorage.setItem(QUICK_MODE_KEY, String(next));
+    } catch {}
+    setInputNum('');
+    setResults([]);
+    setCheckedNumber('');
+    setScannedData(null);
+    inputRef.current?.focus();
   };
 
   // 按 Enter 後全選號碼，下一張直接輸入即可取代
@@ -140,6 +184,7 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
 
   const clearInput = () => {
     setInputNum('');
+    setCheckedNumber('');
     setResults([]);
     setScannedData(null);
     setNotice(null);
@@ -151,6 +196,7 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
     const checks = checkAgainstPeriods(data.invoiceNumber, winningNumbersList, selectedIndex, data.date);
     const best = pickBestResult(checks);
     setInputNum(data.invoiceNumber);
+    setCheckedNumber(data.invoiceNumber);
     setScannedData(data);
     setResults(checks);
     setNotice(null);
@@ -294,7 +340,14 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
       </h3>
       {comparePeriods.length > 0 && (
         <p className="text-xs text-gray-500 mb-4">
-          輸入號碼會{comparePeriods.length > 1 ? '同時' : ''}比對 {comparePeriods.map(item => item.period).join(' 和 ')}（可在下方獎號表切換）；掃描發票會自動選對期別。
+          輸入號碼會{comparePeriods.length > 1 ? '同時' : ''}比對 {comparePeriods.map(item => (isClaimExpired(item.period) ? `${item.period}（已過領獎期限）` : item.period)).join(' 和 ')}（可在下方獎號表切換）；掃描發票會自動選對期別。
+        </p>
+      )}
+      {upcoming && (
+        <p className="text-xs text-indigo-700 bg-indigo-50 rounded-lg px-3 py-2 mb-4">
+          {upcomingNotDrawn
+            ? `下一期 ${upcoming.period} 將於 ${formatMonthDay(upcoming.drawDate)} 開獎。`
+            : `${upcoming.period} 已於 ${formatMonthDay(upcoming.drawDate)} 開獎，請按下方「更新號碼」取得最新獎號。`}
         </p>
       )}
 
@@ -309,11 +362,11 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
             aria-label="發票號碼"
             value={inputNum}
             onChange={(e) => {
-              const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 8);
-              handleManualCheck(val);
+              const digits = e.target.value.replace(/[^0-9]/g, '');
+              handleManualCheck(quickMode ? nextQuickValue(inputNum, digits) : digits.slice(0, 8));
             }}
             onFocus={(e) => e.currentTarget.select()}
-            placeholder="輸入末 3 碼或完整 8 碼"
+            placeholder={quickMode ? '連續輸入末 3 碼' : '輸入末 3 碼或完整 8 碼'}
             className="w-full text-center text-3xl font-mono tracking-widest py-4 rounded-xl border-2 border-indigo-100 focus:border-indigo-500 focus:ring focus:ring-indigo-200 transition-all outline-none text-gray-700 placeholder:text-xl placeholder:text-gray-300"
             disabled={!isReady || isScanning}
           />
@@ -371,6 +424,11 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
         </div>
       </div>
 
+      <label className="mb-3 flex items-start gap-2 text-sm text-gray-600 cursor-pointer select-none">
+        <input type="checkbox" checked={quickMode} onChange={toggleQuickMode} className="mt-0.5 w-4 h-4 accent-indigo-600" />
+        <span>連續對末 3 碼（每輸入 3 碼就自動對獎並記錄，接著直接輸入下一張，不用清除）</span>
+      </label>
+
       {/* AI 圖片辨識設定（正式版不內建金鑰時，使用者可填自己的金鑰） */}
       {!hasBuiltInGeminiApiKey() && (
         <div className="mb-4 text-xs text-gray-500">
@@ -412,6 +470,11 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
 
       {/* Result Display */}
       <div aria-live="polite">
+        {result && quickMode && checkedNumber && (
+          <p className="mb-2 text-sm text-gray-500">
+            末 3 碼 <span className="font-mono font-bold text-gray-700">{checkedNumber}</span> 的結果{inputNum !== checkedNumber ? '（正在輸入下一張）' : ''}
+          </p>
+        )}
         {result && (
           <div className={`rounded-xl p-6 text-center transition-all duration-300 transform ${getResultColor(result)}`}>
             {result.isMatch ? (
@@ -444,6 +507,11 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
                 <div className="text-sm mt-1">
                   {result.description || (results.length > 1 ? `${results.map(item => item.period).join('、')} 皆未中獎` : "再接再厲，下一張會更好！")}
                 </div>
+                {upcoming && upcomingNotDrawn && !scannedData && (
+                  <div className="text-sm mt-3 pt-3 border-t border-black/10">
+                    {upcoming.monthsLabel}的發票請等 {formatMonthDay(upcoming.drawDate)} 開獎後再對；開獎後網站會自動幫歷史紀錄重新對獎。
+                  </div>
+                )}
               </div>
             )}
 
@@ -537,7 +605,11 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
                   )}
                 </div>
                 <div className="shrink-0 whitespace-nowrap flex items-center gap-1">
-                  {item.result.isMatch ? (
+                  {item.result.isMatch && item.result.period && isClaimExpired(item.result.period) ? (
+                    <span className="px-3 py-1 rounded-full text-xs font-bold bg-gray-200 text-gray-500" title="已超過領獎期限">
+                      {resultLabel(item.result)}（已過期）
+                    </span>
+                  ) : item.result.isMatch ? (
                     <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-sm ${item.result.isPartial ? 'bg-orange-100 text-orange-600' : 'bg-red-100 text-red-600'}`}>
                       {resultLabel(item.result)}
                     </span>

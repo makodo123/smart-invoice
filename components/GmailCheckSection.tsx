@@ -4,7 +4,7 @@ import { checkInvoice, pickBestResult, resultLabel } from '../utils/checkLogic';
 import { addHistoryItems } from '../utils/storage';
 import { initTokenClient, requestAccessToken, revokeAccessToken, fetchInvoiceEmails, fetchMessageDetails, GmailMessage, GmailAuthError } from '../services/gmail';
 import { useOnline } from '../utils/useOnline';
-import { findCandidatePeriodIndexes, findPeriodIndexForDate, getComparePeriods, parseInvoiceDate, parsePeriod } from '../utils/period';
+import { findCandidatePeriodIndexes, findPeriodIndexForDate, getComparePeriods, isClaimExpired, parseInvoiceDate, parsePeriod } from '../utils/period';
 
 interface Props {
   winningNumbersList: WinningNumbers[];
@@ -277,7 +277,8 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
       // 寫入前重新讀取歷史紀錄，不會覆蓋掃描期間手動對獎的紀錄
       addHistoryItems(newHistoryItems);
 
-      setScanProgress(`掃描完成！讀了 ${validDateCount} 封信，找到 ${invoiceCount} 張發票，其中 ${matchingResults.length} 張中獎或疑似中獎。${attachmentErrors ? ` 有 ${attachmentErrors} 封郵件或附件讀取失敗。` : ''}${protectedCount ? ` 略過 ${protectedCount} 個有密碼的 PDF（通常是帳單，不是發票）。` : ''}${messages.length === MAX_SCAN_MESSAGES ? ' 已達掃描上限，可能還有未掃描郵件。' : ''}`);
+      const expiredWins = matchingResults.filter(item => item.check.period && isClaimExpired(item.check.period)).length;
+      setScanProgress(`掃描完成！讀了 ${validDateCount} 封信，找到 ${invoiceCount} 張發票，其中 ${matchingResults.length} 張中獎或疑似中獎${expiredWins ? `（${expiredWins} 張已過領獎期限）` : ''}。${attachmentErrors ? ` 有 ${attachmentErrors} 封郵件或附件讀取失敗。` : ''}${protectedCount ? ` 略過 ${protectedCount} 個有密碼的 PDF（通常是帳單，不是發票）。` : ''}${messages.length === MAX_SCAN_MESSAGES ? ' 已達掃描上限，可能還有未掃描郵件。' : ''}`);
 
     } catch (e: any) {
       console.error(e);
@@ -515,13 +516,26 @@ const GmailCheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex 
                         {(item.check.isPartial || item.check.description?.includes('交界')) && <div className="text-xs text-orange-600 mt-1">{item.check.description}</div>}
                     </div>
                     <div className="text-right flex flex-row sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto mt-2 sm:mt-0 border-t sm:border-0 pt-2 sm:pt-0 border-orange-200">
-                        <span className="bg-red-500 text-white text-xs px-2 py-1 rounded-lg font-bold shadow-sm mb-0 sm:mb-1">
-                            {item.check.isPartial ? '疑似中獎，請核對' : item.check.prizeType}
-                        </span>
-                        {!item.check.isPartial && (
-                          <div className="text-sm text-red-600 font-extrabold ml-auto sm:ml-0">
-                             ${item.check.amount?.toLocaleString()}
-                          </div>
+                        {item.check.period && isClaimExpired(item.check.period) ? (
+                          <>
+                            <span className="bg-gray-300 text-gray-600 text-xs px-2 py-1 rounded-lg font-bold mb-0 sm:mb-1">
+                              {item.check.prizeType}・已過領獎期限
+                            </span>
+                            <div className="text-sm text-gray-400 line-through ml-auto sm:ml-0">
+                              ${item.check.amount?.toLocaleString()}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <span className="bg-red-500 text-white text-xs px-2 py-1 rounded-lg font-bold shadow-sm mb-0 sm:mb-1">
+                                {item.check.isPartial ? '疑似中獎，請核對' : item.check.prizeType}
+                            </span>
+                            {!item.check.isPartial && (
+                              <div className="text-sm text-red-600 font-extrabold ml-auto sm:ml-0">
+                                 ${item.check.amount?.toLocaleString()}
+                              </div>
+                            )}
+                          </>
                         )}
                     </div>
                 </div>
