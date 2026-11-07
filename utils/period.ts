@@ -130,3 +130,12 @@ export const nextPeriodAfter = (latestPeriod: string): UpcomingPeriod | null => 
 };
 
 export const formatMonthDay = (date: Date): string => `${date.getMonth() + 1}/${date.getDate()}`;
+
+export type DrawStatus = 'upcoming' | 'today' | 'drawn';
+
+/** 開獎日之前、當天（號碼通常下午才公布）、之後 */
+export const drawStatus = (drawDate: Date, now: Date = new Date()): DrawStatus => {
+  const sameDay = now.getFullYear() === drawDate.getFullYear() && now.getMonth() === drawDate.getMonth() && now.getDate() === drawDate.getDate();
+  if (sameDay) return 'today';
+  return now < drawDate ? 'upcoming' : 'drawn';
+};

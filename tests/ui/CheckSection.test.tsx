@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import CheckSection from '../../components/CheckSection';
+import CheckSection, { nextQuickValue } from '../../components/CheckSection';
 import { checkInvoice } from '../../utils/checkLogic';
 import { LIST, MAY_JUN } from './fixtures';
 
@@ -192,6 +192,15 @@ describe('連續對末 3 碼', () => {
     expect(screen.getByLabelText('發票號碼')).toHaveValue('835');
   });
 
+  test('掃描完整號碼後再輸入，也從新號碼開始，不會把掃描號碼的末碼接上去', () => {
+    expect(nextQuickValue('54348835', '543488359')).toBe('9');
+    expect(nextQuickValue('835', '8351')).toBe('1');
+    // 刪減掃描的完整號碼時直接清空
+    expect(nextQuickValue('54348835', '5434883')).toBe('');
+    // 還沒滿 3 碼時照常累加
+    expect(nextQuickValue('8', '83')).toBe('83');
+  });
+
   test('設定會記住', () => {
     renderSection();
     fireEvent.click(quickCheckbox());
@@ -207,6 +216,15 @@ describe('尚未開獎的下一期', () => {
     expect(screen.getByText('下一期 115年 09~10月 將於 11/25 開獎。')).toBeInTheDocument();
     typeNumber('12345678');
     expect(screen.getByText('😔 沒中獎')).toBeInTheDocument();
+    expect(screen.getByText(/9–10 月的發票請等 11\/25 開獎後再對/)).toBeInTheDocument();
+  });
+
+  test('開獎當天：說明號碼通常下午公布，不叫人馬上按更新，並繼續提醒該期發票要等開獎', () => {
+    vi.setSystemTime(new Date(2026, 10, 25, 10, 0));
+    renderSection();
+    expect(screen.getByText(/今天（11\/25）是 115年 09~10月 開獎日，號碼通常下午公布/)).toBeInTheDocument();
+    expect(screen.queryByText(/請按下方「更新號碼」/)).not.toBeInTheDocument();
+    typeNumber('12345678');
     expect(screen.getByText(/9–10 月的發票請等 11\/25 開獎後再對/)).toBeInTheDocument();
   });
 
@@ -232,5 +250,20 @@ describe('已過領獎期限', () => {
     ]));
     renderSection();
     expect(screen.getByText('頭獎（已過期）')).toBeInTheDocument();
+  });
+});
+
+describe('獎號載入中', () => {
+  test('還沒有獎號時說明正在載入，輸入框與按鈕都停用', () => {
+    render(<CheckSection winningNumbersList={[]} selectedIndex={0} />);
+    expect(screen.getByRole('status')).toHaveTextContent('正在載入中獎號碼');
+    expect(screen.getByLabelText('發票號碼')).toBeDisabled();
+    expect(screen.getByRole('button', { name: /掃描 QR Code/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /上傳照片/ })).toBeDisabled();
+  });
+
+  test('載入完成後不再顯示', () => {
+    renderSection();
+    expect(screen.queryByText(/正在載入中獎號碼/)).not.toBeInTheDocument();
   });
 });

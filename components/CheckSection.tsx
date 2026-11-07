@@ -11,7 +11,7 @@ import {
 import { estimateNetPrize, OFFICIAL_CLAIM_INFO_URL } from '../utils/prize';
 import { recheckHistory } from '../utils/historyRecheck';
 import { decodeQRFromImage, parseTaiwanInvoiceQR } from '../utils/qrScanner';
-import { formatMonthDay, formatShortDate, getClaimWindow, getComparePeriods, isClaimExpired, nextPeriodAfter } from '../utils/period';
+import { drawStatus, formatMonthDay, formatShortDate, getClaimWindow, getComparePeriods, isClaimExpired, nextPeriodAfter } from '../utils/period';
 import { QrScannerModal } from './QrScannerModal';
 
 interface Props {
@@ -43,10 +43,12 @@ const readQuickMode = () => {
 };
 
 /**
- * 連續對末 3 碼：已有 3 碼時再輸入，就從新號碼開始；貼上較長的號碼時取最後 3 碼。
+ * 連續對末 3 碼：輸入框已有對過獎的號碼（手動的 3 碼或掃描的 8 碼）時，再輸入就從新號碼開始；
+ * 刪減掃描的完整號碼時直接清空；貼上較長的號碼時取最後 3 碼。
  */
 export const nextQuickValue = (previous: string, typed: string): string => {
-  const fresh = previous.length === 3 && typed.length > 3 && typed.startsWith(previous) ? typed.slice(3) : typed;
+  if (previous.length > 3 && typed.length < previous.length) return '';
+  const fresh = previous.length >= 3 && typed.length > previous.length && typed.startsWith(previous) ? typed.slice(previous.length) : typed;
   return fresh.slice(-3);
 };
 
@@ -78,7 +80,9 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
   const otherResults = results.filter(item => item !== result);
   const visibleHistory = winsOnly ? history.filter(item => item.result.isMatch) : history;
   const upcoming = isReady ? nextPeriodAfter(winningNumbersList[0].period) : null;
-  const upcomingNotDrawn = Boolean(upcoming && new Date() < upcoming.drawDate);
+  const upcomingStatus = upcoming ? drawStatus(upcoming.drawDate) : null;
+  // 開獎當天號碼通常下午才公布，當天仍提醒該期發票要等開獎
+  const upcomingNotDrawn = upcomingStatus === 'upcoming' || upcomingStatus === 'today';
 
   // 歷史紀錄可能被 Gmail 區塊或其他分頁改動，統一從 localStorage 重新讀取
   useEffect(() => {
@@ -343,11 +347,17 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
           輸入號碼會{comparePeriods.length > 1 ? '同時' : ''}比對 {comparePeriods.map(item => (isClaimExpired(item.period) ? `${item.period}（已過領獎期限）` : item.period)).join(' 和 ')}（可在下方獎號表切換）；掃描發票會自動選對期別。
         </p>
       )}
+      {!isReady && (
+        <p className="text-sm text-gray-500 bg-gray-50 rounded-lg px-3 py-2 mb-4 flex items-center gap-2" role="status">
+          <span className="inline-block w-4 h-4 border-2 border-gray-300 border-t-indigo-500 rounded-full animate-spin" aria-hidden="true" />
+          正在載入中獎號碼，載入完成就能對獎…
+        </p>
+      )}
       {upcoming && (
         <p className="text-xs text-indigo-700 bg-indigo-50 rounded-lg px-3 py-2 mb-4">
-          {upcomingNotDrawn
-            ? `下一期 ${upcoming.period} 將於 ${formatMonthDay(upcoming.drawDate)} 開獎。`
-            : `${upcoming.period} 已於 ${formatMonthDay(upcoming.drawDate)} 開獎，請按下方「更新號碼」取得最新獎號。`}
+          {upcomingStatus === 'upcoming' && `下一期 ${upcoming.period} 將於 ${formatMonthDay(upcoming.drawDate)} 開獎。`}
+          {upcomingStatus === 'today' && `今天（${formatMonthDay(upcoming.drawDate)}）是 ${upcoming.period} 開獎日，號碼通常下午公布；公布後幾小時內，重新開啟網站就會看到新號碼。`}
+          {upcomingStatus === 'drawn' && `${upcoming.period} 已於 ${formatMonthDay(upcoming.drawDate)} 開獎，請按下方「更新號碼」取得最新獎號。`}
         </p>
       )}
 
@@ -390,7 +400,7 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
           <button
             onClick={() => setIsScannerOpen(true)}
             disabled={!isReady || isScanning}
-            className={`flex-1 md:flex-none min-w-0 flex items-center justify-center px-4 md:px-6 py-4 rounded-xl font-bold transition-all shadow-sm ${
+            className={`flex-1 md:flex-none min-w-0 flex items-center justify-center px-4 md:px-6 py-4 rounded-xl font-bold transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
               isScanning
                 ? 'bg-gray-100 text-gray-400 cursor-wait'
                 : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95'
@@ -415,7 +425,7 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={!isReady || isScanning}
-            className="shrink-0 flex items-center justify-center gap-1.5 px-3 md:px-4 py-4 rounded-xl font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 active:scale-95 transition-all border border-gray-200 whitespace-nowrap"
+            className="shrink-0 flex items-center justify-center gap-1.5 px-3 md:px-4 py-4 rounded-xl font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 active:scale-95 transition-all border border-gray-200 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
             title="選擇或拍攝發票照片"
           >
             <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
@@ -472,7 +482,7 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
       <div aria-live="polite">
         {result && quickMode && checkedNumber && (
           <p className="mb-2 text-sm text-gray-500">
-            末 3 碼 <span className="font-mono font-bold text-gray-700">{checkedNumber}</span> 的結果{inputNum !== checkedNumber ? '（正在輸入下一張）' : ''}
+            {checkedNumber.length === 3 ? '末 3 碼' : '號碼'} <span className="font-mono font-bold text-gray-700">{checkedNumber}</span> 的結果{inputNum !== checkedNumber ? '（正在輸入下一張）' : ''}
           </p>
         )}
         {result && (

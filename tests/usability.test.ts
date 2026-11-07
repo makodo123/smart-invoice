@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'vitest';
 import { checkAgainstPeriods, checkInvoice, pickBestResult, resultLabel } from '../utils/checkLogic';
 import {
-  findCandidatePeriodIndexes, findPeriodIndexForDate, getClaimWindow, getComparePeriods, isClaimExpired, nextPeriodAfter,
+  drawStatus, findCandidatePeriodIndexes, findPeriodIndexForDate, getClaimWindow, getComparePeriods, isClaimExpired, nextPeriodAfter,
   parseInvoiceDate, periodOfDate,
 } from '../utils/period';
 import { parseTaiwanInvoiceQR } from '../utils/qrScanner';
@@ -128,6 +128,14 @@ describe('下一期與開獎日', () => {
     const next = nextPeriodAfter('114年 11~12月')!;
     expect(next.period).toBe('115年 01~02月');
     expect([next.drawDate.getFullYear(), next.drawDate.getMonth(), next.drawDate.getDate()]).toEqual([2026, 2, 25]);
+  });
+
+  test('開獎日之前、當天、之後', () => {
+    const draw = new Date(2026, 10, 25);
+    expect(drawStatus(draw, new Date(2026, 10, 24, 23, 59))).toBe('upcoming');
+    expect(drawStatus(draw, new Date(2026, 10, 25, 0, 0))).toBe('today');
+    expect(drawStatus(draw, new Date(2026, 10, 25, 23, 59))).toBe('today');
+    expect(drawStatus(draw, new Date(2026, 10, 26, 0, 0))).toBe('drawn');
   });
 
   test('發票日期所屬的期別與開獎日', () => {
