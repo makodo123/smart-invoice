@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import CheckSection, { nextQuickValue } from '../../components/CheckSection';
+import CheckSection from '../../components/CheckSection';
 import { checkInvoice } from '../../utils/checkLogic';
 import { LIST, MAY_JUN } from './fixtures';
 
@@ -18,6 +18,11 @@ const waitForAutoSave = () => act(() => {
 
 const renderSection = (selectedIndex = 0) => render(<CheckSection winningNumbersList={LIST} selectedIndex={selectedIndex} />);
 
+/** 關閉「連續對獎」，改成一般模式（號碼留在輸入框、照常累加） */
+const useNormalMode = () => {
+  fireEvent.click(screen.getByRole('checkbox', { name: /連續對獎/ }));
+};
+
 beforeEach(() => {
   localStorage.clear();
   // 固定今天的日期，領獎期限的判斷才不會隨時間改變
@@ -31,14 +36,17 @@ afterEach(() => {
 });
 
 describe('快速對獎畫面', () => {
-  test('說明目前比對的兩期，輸入框提示末 3 碼或完整 8 碼', () => {
+  test('說明目前比對的兩期；輸入框提示末 3 碼，一般模式提示末 3 碼或完整 8 碼', () => {
     renderSection();
     expect(screen.getByText(/輸入號碼會同時比對 115年 07~08月 和 115年 05~06月/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('輸入末 3 碼')).toBeInTheDocument();
+    useNormalMode();
     expect(screen.getByPlaceholderText('輸入末 3 碼或完整 8 碼')).toBeInTheDocument();
   });
 
   test('只接受數字，最多 8 碼', () => {
     renderSection();
+    useNormalMode();
     typeNumber('AB-1234567890');
     expect(screen.getByLabelText('發票號碼')).toHaveValue('12345678');
   });
@@ -90,6 +98,7 @@ describe('快速對獎畫面', () => {
 
   test('清除按鈕清空輸入與結果', () => {
     renderSection();
+    useNormalMode();
     typeNumber('835');
     fireEvent.click(screen.getByRole('button', { name: '清除輸入' }));
     expect(screen.getByLabelText('發票號碼')).toHaveValue('');
@@ -156,57 +165,119 @@ describe('歷史紀錄', () => {
   });
 });
 
-describe('連續對末 3 碼', () => {
-  const quickCheckbox = () => screen.getByRole('checkbox', { name: /連續對末 3 碼/ });
+describe('連續對獎（預設開啟）', () => {
+  const quickCheckbox = () => screen.getByRole('checkbox', { name: /連續對獎/ });
+  const input = () => screen.getByLabelText('發票號碼');
+  const caption = () => screen.getByText((_, element) => element?.tagName === 'P' && /^(末 3 碼|號碼) \d+ 的結果/.test(element.textContent ?? ''));
+  const historyButton = (number: string) => screen.queryByRole('button', { name: `刪除 ${number} 這筆紀錄` });
+  const pendingPrompt = () => screen.queryByText(/對中了！請拿出這張發票/);
 
-  test('每滿 3 碼就對獎並記錄，下一個數字從新號碼開始', () => {
-    renderSection();
-    fireEvent.click(quickCheckbox());
-    const input = screen.getByLabelText('發票號碼');
-    expect(input).toHaveAttribute('placeholder', '連續輸入末 3 碼');
-
-    typeNumber('835');
-    expect(screen.getByText('🎉 至少中六獎！')).toBeInTheDocument();
-    const caption = () => screen.getByText((_, element) => element?.tagName === 'P' && /^末 3 碼 \d+ 的結果/.test(element.textContent ?? ''));
-    expect(caption()).toHaveTextContent('末 3 碼 835 的結果');
-
-    // 接著打下一張的第一個數字：不會黏成 8351，上一張的結果保留
-    typeNumber('8351');
-    expect(input).toHaveValue('1');
-    expect(caption()).toHaveTextContent('末 3 碼 835 的結果（正在輸入下一張）');
-    expect(screen.getByText('🎉 至少中六獎！')).toBeInTheDocument();
-
-    typeNumber('123');
-    expect(input).toHaveValue('123');
-    expect(screen.getByText('😔 沒中獎')).toBeInTheDocument();
-
-    // 不用等待，兩張都已記錄
-    expect(screen.getByRole('button', { name: '刪除 835 這筆紀錄' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '刪除 123 這筆紀錄' })).toBeInTheDocument();
-  });
-
-  test('貼上完整號碼時只取末 3 碼', () => {
-    renderSection();
-    fireEvent.click(quickCheckbox());
-    typeNumber('54348835');
-    expect(screen.getByLabelText('發票號碼')).toHaveValue('835');
-  });
-
-  test('掃描完整號碼後再輸入，也從新號碼開始，不會把掃描號碼的末碼接上去', () => {
-    expect(nextQuickValue('54348835', '543488359')).toBe('9');
-    expect(nextQuickValue('835', '8351')).toBe('1');
-    // 刪減掃描的完整號碼時直接清空
-    expect(nextQuickValue('54348835', '5434883')).toBe('');
-    // 還沒滿 3 碼時照常累加
-    expect(nextQuickValue('8', '83')).toBe('83');
-  });
-
-  test('設定會記住', () => {
-    renderSection();
-    fireEvent.click(quickCheckbox());
-    cleanup();
+  test('預設開啟，提示輸入末 3 碼', () => {
     renderSection();
     expect(quickCheckbox()).toBeChecked();
+    expect(input()).toHaveAttribute('placeholder', '輸入末 3 碼');
+  });
+
+  test('末 3 碼沒中：馬上記錄並清空，直接打下一張', () => {
+    renderSection();
+    typeNumber('123');
+    expect(screen.getByText('😔 沒中獎')).toBeInTheDocument();
+    expect(caption()).toHaveTextContent('末 3 碼 123 的結果・已記錄');
+    expect(input()).toHaveValue('');
+    expect(historyButton('123')).toBeInTheDocument();
+    expect(pendingPrompt()).not.toBeInTheDocument();
+
+    // 打下一張的途中保留上一張的結果
+    typeNumber('9');
+    expect(input()).toHaveValue('9');
+    expect(screen.getByText('😔 沒中獎')).toBeInTheDocument();
+  });
+
+  test('末 3 碼對中：請輸入完整 8 碼，確認後以完整號碼取代末 3 碼的紀錄', () => {
+    renderSection();
+    typeNumber('835');
+    expect(screen.getByText('🎉 至少中六獎！')).toBeInTheDocument();
+    expect(pendingPrompt()).toBeInTheDocument();
+    expect(input()).toHaveValue('');
+    expect(input()).toHaveAttribute('placeholder', '輸入這張發票的完整 8 碼');
+    expect(historyButton('835')).toBeInTheDocument();
+
+    // 打到一半不會被當成下一張的末 3 碼
+    typeNumber('543');
+    expect(input()).toHaveValue('543');
+    expect(pendingPrompt()).toBeInTheDocument();
+
+    typeNumber('54348835');
+    expect(screen.getByText('🎉 恭喜中獎！')).toBeInTheDocument();
+    expect(screen.getByText('頭獎 (20萬)')).toBeInTheDocument();
+    expect(caption()).toHaveTextContent('號碼 54348835 的結果・已記錄');
+    expect(pendingPrompt()).not.toBeInTheDocument();
+    expect(input()).toHaveValue('');
+    expect(historyButton('54348835')).toBeInTheDocument();
+    expect(historyButton('835')).not.toBeInTheDocument();
+
+    // 回到輸入末 3 碼
+    expect(input()).toHaveAttribute('placeholder', '輸入末 3 碼');
+    typeNumber('123');
+    expect(screen.getByText('😔 沒中獎')).toBeInTheDocument();
+  });
+
+  test('末 3 碼與特別獎相同也要輸入完整號碼確認', () => {
+    renderSection();
+    typeNumber('565');
+    expect(screen.getByText('⚠️ 疑似中獎')).toBeInTheDocument();
+    expect(pendingPrompt()).toBeInTheDocument();
+    typeNumber('12345565');
+    expect(screen.getByText('😔 沒中獎')).toBeInTheDocument();
+    expect(historyButton('12345565')).toBeInTheDocument();
+    expect(historyButton('565')).not.toBeInTheDocument();
+  });
+
+  test('完整號碼的末 3 碼和剛才不同：提醒可能打錯，仍以完整號碼記錄', () => {
+    renderSection();
+    typeNumber('835');
+    typeNumber('12345678');
+    expect(screen.getByRole('alert')).toHaveTextContent('完整號碼 12345678 的末 3 碼是 678，和剛才輸入的 835 不同');
+    expect(historyButton('12345678')).toBeInTheDocument();
+    expect(historyButton('835')).not.toBeInTheDocument();
+  });
+
+  test('先略過：保留末 3 碼的紀錄，繼續下一張', () => {
+    renderSection();
+    typeNumber('835');
+    fireEvent.click(screen.getByRole('button', { name: '先略過' }));
+    expect(pendingPrompt()).not.toBeInTheDocument();
+    expect(historyButton('835')).toBeInTheDocument();
+    expect(screen.getByText('至少六獎')).toBeInTheDocument();
+    typeNumber('123');
+    expect(screen.getByText('😔 沒中獎')).toBeInTheDocument();
+    expect(historyButton('123')).toBeInTheDocument();
+  });
+
+  test('貼上完整號碼：直接對完整號碼並記錄', () => {
+    renderSection();
+    typeNumber('54348835');
+    expect(screen.getByText('頭獎 (20萬)')).toBeInTheDocument();
+    expect(historyButton('54348835')).toBeInTheDocument();
+    expect(pendingPrompt()).not.toBeInTheDocument();
+  });
+
+  test('關閉後是一般模式：號碼留在輸入框照常累加', () => {
+    renderSection();
+    useNormalMode();
+    expect(quickCheckbox()).not.toBeChecked();
+    typeNumber('835');
+    typeNumber('8351');
+    expect(input()).toHaveValue('8351');
+    expect(pendingPrompt()).not.toBeInTheDocument();
+  });
+
+  test('關閉的設定會記住', () => {
+    renderSection();
+    useNormalMode();
+    cleanup();
+    renderSection();
+    expect(quickCheckbox()).not.toBeChecked();
   });
 });
 

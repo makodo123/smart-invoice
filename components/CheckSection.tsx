@@ -32,34 +32,31 @@ const GEMINI_KEY_HELP_URL = 'https://aistudio.google.com/apikey';
 const isBigPrize = (res: CheckResult) =>
   !res.isPartial && [PrizeType.Special, PrizeType.Grand, PrizeType.First].includes(res.prizeType);
 
-const QUICK_MODE_KEY = 'quick3_mode';
+// 連續對獎預設開啟；舊名稱（quick3_mode）的設定不沿用
+const QUICK_MODE_KEY = 'continuous_check_mode';
 
 const readQuickMode = () => {
   try {
-    return localStorage.getItem(QUICK_MODE_KEY) === 'true';
+    return localStorage.getItem(QUICK_MODE_KEY) !== 'false';
   } catch {
-    return false;
+    return true;
   }
 };
 
-/**
- * 連續對末 3 碼：輸入框已有對過獎的號碼（手動的 3 碼或掃描的 8 碼）時，再輸入就從新號碼開始；
- * 刪減掃描的完整號碼時直接清空；貼上較長的號碼時取最後 3 碼。
- */
-export const nextQuickValue = (previous: string, typed: string): string => {
-  if (previous.length > 3 && typed.length < previous.length) return '';
-  const fresh = previous.length >= 3 && typed.length > previous.length && typed.startsWith(previous) ? typed.slice(previous.length) : typed;
-  return fresh.slice(-3);
-};
+/** 末 3 碼對中、要輸入完整號碼才知道獎項：至少六獎（可能更高）或與特別獎／特獎末碼相同 */
+export const needsFullNumber = (result: CheckResult | null): boolean =>
+  Boolean(result?.isMatch && (result.mayBeHigher || result.isPartial));
 
 const formatHistoryTime = (timestamp: number) =>
   new Date(timestamp).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 
 const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) => {
   const [inputNum, setInputNum] = useState('');
-  // 目前畫面上的對獎結果屬於哪個號碼（連續對末 3 碼時，輸入下一張的途中仍顯示上一張的結果）
+  // 目前畫面上的對獎結果屬於哪個號碼（連續對獎時，輸入下一張的途中仍顯示上一張的結果）
   const [checkedNumber, setCheckedNumber] = useState('');
   const [quickMode, setQuickMode] = useState(readQuickMode);
+  // 連續對獎：末 3 碼對中，等使用者輸入這張發票的完整 8 碼
+  const [pendingWin, setPendingWin] = useState<{ number: string; historyId: string } | null>(null);
   const [results, setResults] = useState<CheckResult[]>([]);
   const [scannedData, setScannedData] = useState<InvoiceData | null>(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -140,7 +137,19 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
     }));
   };
 
-  // 手動輸入停頓後自動存入歷史紀錄（掃描結果在掃描時就已存檔；連續對末 3 碼時每滿 3 碼就存）
+  /** 連續對獎的紀錄每筆都是一張發票，不像一般模式會把補字、退格合併成同一筆 */
+  const recordQuickNumber = (num: string, checks: CheckResult[]): string | null => {
+    const best = pickBestResult(checks);
+    if (!best) return null;
+    const id = `${Date.now()}-${num}`;
+    setHistory(saveHistoryItem({
+      id, number: num, timestamp: Date.now(), result: best,
+      source: 'manual', checkedPeriods: checks.flatMap(item => (item.period ? [item.period] : [])),
+    }));
+    return id;
+  };
+
+  // 一般模式：手動輸入停頓後自動存入歷史紀錄（掃描結果在掃描時就已存檔）
   useEffect(() => {
     if (quickMode || scannedData || inputNum.length < 3 || !isReady) return;
 
@@ -156,15 +165,54 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
     setScannedData(null); // Clear scanned details on manual input
     setNotice(null);
     if (num.length >= 3 && isReady) {
-      const checks = checkAgainstPeriods(num, winningNumbersList, selectedIndex);
-      setResults(checks);
+      setResults(checkAgainstPeriods(num, winningNumbersList, selectedIndex));
       setCheckedNumber(num);
-      if (quickMode) saveTypedNumber(num, checks);
-    } else if (!quickMode) {
-      // 連續對末 3 碼時，輸入下一張的途中保留上一張的結果
+    } else {
       setResults([]);
       setCheckedNumber('');
     }
+  };
+
+  /**
+   * 連續對獎：輸入末 3 碼就對獎並記錄、清空輸入框。沒對中直接打下一張；
+   * 對中（可能更高獎或疑似特別獎）時，等使用者輸入這張發票的完整 8 碼確認，再取代末 3 碼那筆紀錄。
+   * 輸入途中保留上一張的結果；貼上完整號碼時直接對完整號碼。
+   */
+  const handleQuickInput = (num: string) => {
+    setScannedData(null);
+    setNotice(null);
+    const complete = pendingWin ? num.length === 8 : num.length >= 3;
+    if (!complete || !isReady) {
+      setInputNum(num);
+      return;
+    }
+
+    const checks = checkAgainstPeriods(num, winningNumbersList, selectedIndex);
+    setResults(checks);
+    setCheckedNumber(num);
+    setInputNum('');
+
+    if (pendingWin) {
+      if (!num.endsWith(pendingWin.number)) {
+        setNotice({ tone: 'warn', text: `完整號碼 ${num} 的末 3 碼是 ${num.slice(-3)}，和剛才輸入的 ${pendingWin.number} 不同，請確認有沒有打錯。` });
+      }
+      removeHistoryItem(pendingWin.historyId);
+      recordQuickNumber(num, checks);
+      setPendingWin(null);
+      return;
+    }
+
+    const historyId = recordQuickNumber(num, checks);
+    if (num.length === 3 && historyId && needsFullNumber(pickBestResult(checks))) {
+      setPendingWin({ number: num, historyId });
+    }
+  };
+
+  /** 手邊沒有發票可核對：末 3 碼那筆紀錄保留（至少六獎／核對全碼），繼續下一張 */
+  const skipPendingWin = () => {
+    setPendingWin(null);
+    setInputNum('');
+    inputRef.current?.focus();
   };
 
   const toggleQuickMode = () => {
@@ -174,6 +222,7 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
       localStorage.setItem(QUICK_MODE_KEY, String(next));
     } catch {}
     setInputNum('');
+    setPendingWin(null);
     setResults([]);
     setCheckedNumber('');
     setScannedData(null);
@@ -188,6 +237,7 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
 
   const clearInput = () => {
     setInputNum('');
+    setPendingWin(null);
     setCheckedNumber('');
     setResults([]);
     setScannedData(null);
@@ -199,7 +249,9 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
   const handleScanSuccess = (data: InvoiceData): CheckResult | null => {
     const checks = checkAgainstPeriods(data.invoiceNumber, winningNumbersList, selectedIndex, data.date);
     const best = pickBestResult(checks);
-    setInputNum(data.invoiceNumber);
+    // 連續對獎時輸入框留給下一張；號碼顯示在結果卡片上
+    setInputNum(quickMode ? '' : data.invoiceNumber);
+    setPendingWin(null);
     setCheckedNumber(data.invoiceNumber);
     setScannedData(data);
     setResults(checks);
@@ -373,10 +425,12 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
             value={inputNum}
             onChange={(e) => {
               const digits = e.target.value.replace(/[^0-9]/g, '');
-              handleManualCheck(quickMode ? nextQuickValue(inputNum, digits) : digits.slice(0, 8));
+              const value = digits.slice(0, 8);
+              if (quickMode) handleQuickInput(value);
+              else handleManualCheck(value);
             }}
             onFocus={(e) => e.currentTarget.select()}
-            placeholder={quickMode ? '連續輸入末 3 碼' : '輸入末 3 碼或完整 8 碼'}
+            placeholder={!quickMode ? '輸入末 3 碼或完整 8 碼' : pendingWin ? '輸入這張發票的完整 8 碼' : '輸入末 3 碼'}
             className="w-full text-center text-3xl font-mono tracking-widest py-4 rounded-xl border-2 border-indigo-100 focus:border-indigo-500 focus:ring focus:ring-indigo-200 transition-all outline-none text-gray-700 placeholder:text-xl placeholder:text-gray-300"
             disabled={!isReady || isScanning}
           />
@@ -436,7 +490,7 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
 
       <label className="mb-3 flex items-start gap-2 text-sm text-gray-600 cursor-pointer select-none">
         <input type="checkbox" checked={quickMode} onChange={toggleQuickMode} className="mt-0.5 w-4 h-4 accent-indigo-600" />
-        <span>連續對末 3 碼（每輸入 3 碼就自動對獎並記錄，接著直接輸入下一張，不用清除）</span>
+        <span>連續對獎（輸入末 3 碼，沒中就直接打下一張；對中時再輸入完整 8 碼確認獎項）</span>
       </label>
 
       {/* AI 圖片辨識設定（正式版不內建金鑰時，使用者可填自己的金鑰） */}
@@ -480,9 +534,17 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
 
       {/* Result Display */}
       <div aria-live="polite">
+        {quickMode && pendingWin && (
+          <div className="mb-3 p-3 rounded-lg border-2 border-amber-300 bg-amber-50 text-amber-900 text-sm flex items-start justify-between gap-3">
+            <span>
+              末 3 碼 <span className="font-mono font-bold">{pendingWin.number}</span> 對中了！請拿出這張發票，在上方輸入<span className="font-bold">完整 8 碼</span>確認獎項。
+            </span>
+            <button type="button" onClick={skipPendingWin} className="shrink-0 underline font-medium">先略過</button>
+          </div>
+        )}
         {result && quickMode && checkedNumber && (
           <p className="mb-2 text-sm text-gray-500">
-            {checkedNumber.length === 3 ? '末 3 碼' : '號碼'} <span className="font-mono font-bold text-gray-700">{checkedNumber}</span> 的結果{inputNum !== checkedNumber ? '（正在輸入下一張）' : ''}
+            {checkedNumber.length === 3 ? '末 3 碼' : '號碼'} <span className="font-mono font-bold text-gray-700">{checkedNumber}</span> 的結果・已記錄
           </p>
         )}
         {result && (
