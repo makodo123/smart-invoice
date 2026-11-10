@@ -96,8 +96,20 @@ describe('依期別對獎', () => {
     const none = checkInvoice('000', MAY_JUN);
     const partial = checkInvoice('565', JUL_AUG);
     const sixth = checkInvoice('333', MAY_JUN);
-    expect(pickBestResult([none, partial, sixth])).toBe(sixth);
-    expect(pickBestResult([none, partial])).toBe(partial);
+    // 10/1 兩期都還在領獎期限內
+    const oct1 = new Date(2026, 9, 1);
+    expect(pickBestResult([none, partial, sixth], oct1)).toBe(sixth);
+    expect(pickBestResult([none, partial], oct1)).toBe(partial);
+  });
+
+  test('pickBestResult：已過領獎期限的中獎排在還能領的後面，但仍比未中獎前面', () => {
+    // 11/10：5–6 月期已在 11/5 截止
+    const nov10 = new Date(2026, 10, 10);
+    const expiredFirst = checkInvoice('24121106', MAY_JUN);
+    const claimableSixth = checkInvoice('11118835', JUL_AUG);
+    const none = checkInvoice('11118835', MAY_JUN);
+    expect(pickBestResult([expiredFirst, claimableSixth], nov10)).toBe(claimableSixth);
+    expect(pickBestResult([none, expiredFirst], nov10)).toBe(expiredFirst);
   });
 
   test('收信日在期別交界時兩期都列入候選', () => {
@@ -337,5 +349,39 @@ describe('新一期開獎後重新對獎歷史紀錄', async () => {
   test('Gmail 紀錄已依日期確定期別，不重新對獎', () => {
     const item = { id: '5', number: '55556666', timestamp: oct1, result: checkInvoice('55556666', JUL_AUG), source: 'gmail' as const };
     expect(recheckHistory([item], NEW_LIST).dirty).toBe(false);
+  });
+});
+
+describe('歷史紀錄上限', () => {
+  const entry = (number: string, index: number, win = false) => ({
+    id: `${number}-${index}`,
+    number,
+    timestamp: index,
+    result: win ? checkInvoice('835', JUL_AUG) : checkInvoice('000', JUL_AUG),
+  });
+
+  test('超過上限時先刪最舊的未中獎，中獎紀錄保留', async () => {
+    const { trimHistory } = await import('../utils/storage');
+    // 最新在前：1 筆新的未中獎、1 筆中獎、3 筆舊的未中獎
+    const list = [entry('105', 5), entry('835', 4, true), entry('103', 3), entry('102', 2), entry('101', 1)];
+    expect(trimHistory(list, 3).map(h => h.number)).toEqual(['105', '835', '103']);
+    expect(trimHistory(list, 2).map(h => h.number)).toEqual(['105', '835']);
+    expect(trimHistory(list, 1).map(h => h.number)).toEqual(['835']);
+  });
+
+  test('一次對 300 張沒中的發票，先前的中獎紀錄還在', async () => {
+    const store = new Map<string, string>();
+    (globalThis as any).localStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    };
+    const { saveHistoryItem, getHistory, HISTORY_LIMIT } = await import('../utils/storage');
+    expect(HISTORY_LIMIT).toBe(300);
+    saveHistoryItem(entry('835', 0, true));
+    for (let i = 1; i <= 300; i++) saveHistoryItem(entry(String(i).padStart(3, '0'), i));
+    const history = getHistory();
+    expect(history).toHaveLength(300);
+    expect(history.some(h => h.number === '835')).toBe(true);
   });
 });

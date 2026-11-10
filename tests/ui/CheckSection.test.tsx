@@ -64,6 +64,7 @@ describe('快速對獎畫面', () => {
 
   test('末 3 碼與頭獎相同：顯示至少六獎，提示輸入完整號碼', () => {
     renderSection();
+    useNormalMode();
     typeNumber('835');
     expect(screen.getByText('🎉 至少中六獎！')).toBeInTheDocument();
     expect(screen.getByText('輸入完整 8 碼，可確認是否中更高獎項')).toBeInTheDocument();
@@ -88,11 +89,13 @@ describe('快速對獎畫面', () => {
     expect(screen.getByText('115年 07~08月、115年 05~06月 皆未中獎')).toBeInTheDocument();
   });
 
-  test('切到已過期的期別：中獎時提醒超過領獎期限，不顯示領獎方式', () => {
+  test('切到已過期的期別：中獎時改成灰色的「已過領獎期限」，說明截止日，不顯示領獎方式', () => {
     renderSection(2);
     typeNumber('07225810');
-    expect(screen.getByText('🎉 恭喜中獎！')).toBeInTheDocument();
-    expect(screen.getByText('⚠️ 此期已超過領獎期限')).toBeInTheDocument();
+    expect(screen.getByText('⌛ 已過領獎期限')).toBeInTheDocument();
+    expect(screen.queryByText('🎉 恭喜中獎！')).not.toBeInTheDocument();
+    expect(screen.getByText('對照：頭獎 (20萬)')).toBeInTheDocument();
+    expect(screen.getByText(/這期的領獎期限到 115\/9\/5 為止，已經不能領獎/)).toBeInTheDocument();
     expect(screen.queryByText('領獎方式')).not.toBeInTheDocument();
   });
 
@@ -168,9 +171,10 @@ describe('歷史紀錄', () => {
 describe('連續對獎（預設開啟）', () => {
   const quickCheckbox = () => screen.getByRole('checkbox', { name: /連續對獎/ });
   const input = () => screen.getByLabelText('發票號碼');
-  const caption = () => screen.getByText((_, element) => element?.tagName === 'P' && /^(末 3 碼|號碼) \d+ 的結果/.test(element.textContent ?? ''));
+  /** 輸入框下方的精簡結果 */
+  const caption = () => screen.getByText((_, element) => element?.tagName === 'P' && /^(末 3 碼|號碼) \d+：/.test(element.textContent ?? ''));
   const historyButton = (number: string) => screen.queryByRole('button', { name: `刪除 ${number} 這筆紀錄` });
-  const pendingPrompt = () => screen.queryByText(/對中了！請拿出這張發票/);
+  const pendingPrompt = () => screen.queryByText(/對中了！請輸入這張發票的/);
 
   test('預設開啟，提示輸入末 3 碼', () => {
     renderSection();
@@ -182,7 +186,7 @@ describe('連續對獎（預設開啟）', () => {
     renderSection();
     typeNumber('123');
     expect(screen.getByText('😔 沒中獎')).toBeInTheDocument();
-    expect(caption()).toHaveTextContent('末 3 碼 123 的結果・已記錄');
+    expect(caption()).toHaveTextContent('末 3 碼 123：未中獎・已記錄');
     expect(input()).toHaveValue('');
     expect(historyButton('123')).toBeInTheDocument();
     expect(pendingPrompt()).not.toBeInTheDocument();
@@ -199,7 +203,9 @@ describe('連續對獎（預設開啟）', () => {
     expect(screen.getByText('🎉 至少中六獎！')).toBeInTheDocument();
     expect(pendingPrompt()).toBeInTheDocument();
     expect(input()).toHaveValue('');
-    expect(input()).toHaveAttribute('placeholder', '輸入這張發票的完整 8 碼');
+    expect(input()).toHaveAttribute('placeholder', '輸入完整 8 碼');
+    // 卡片不再重複「輸入完整 8 碼」那句
+    expect(screen.queryByText('輸入完整 8 碼，可確認是否中更高獎項')).not.toBeInTheDocument();
     expect(historyButton('835')).toBeInTheDocument();
 
     // 打到一半不會被當成下一張的末 3 碼
@@ -210,7 +216,7 @@ describe('連續對獎（預設開啟）', () => {
     typeNumber('54348835');
     expect(screen.getByText('🎉 恭喜中獎！')).toBeInTheDocument();
     expect(screen.getByText('頭獎 (20萬)')).toBeInTheDocument();
-    expect(caption()).toHaveTextContent('號碼 54348835 的結果・已記錄');
+    expect(caption()).toHaveTextContent('號碼 54348835：頭獎・已記錄');
     expect(pendingPrompt()).not.toBeInTheDocument();
     expect(input()).toHaveValue('');
     expect(historyButton('54348835')).toBeInTheDocument();
@@ -240,6 +246,17 @@ describe('連續對獎（預設開啟）', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('完整號碼 12345678 的末 3 碼是 678，和剛才輸入的 835 不同');
     expect(historyButton('12345678')).toBeInTheDocument();
     expect(historyButton('835')).not.toBeInTheDocument();
+  });
+
+  test('末 3 碼只和已過領獎期限的期別相同：不要求輸入完整號碼，直接打下一張', () => {
+    vi.setSystemTime(new Date(2026, 10, 10, 12, 0));
+    renderSection();
+    typeNumber('106');
+    expect(pendingPrompt()).not.toBeInTheDocument();
+    expect(caption()).toHaveTextContent('末 3 碼 106：只和已過領獎期限的 115年 05~06月 相同・已記錄');
+    expect(screen.getByText('⌛ 已過領獎期限')).toBeInTheDocument();
+    expect(input()).toHaveAttribute('placeholder', '輸入末 3 碼');
+    expect(screen.getByText('至少六獎（已過期）')).toBeInTheDocument();
   });
 
   test('先略過：保留末 3 碼的紀錄，繼續下一張', () => {

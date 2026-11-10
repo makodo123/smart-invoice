@@ -2,7 +2,8 @@ import { HistoryItem, InvoiceData } from '../types';
 
 const KEY = 'invoice_history';
 const DATA_KEY = 'smart_invoice_data';
-const HISTORY_LIMIT = 50;
+// 連續對獎時每張發票都記一筆，上限要夠放一整疊；滿了先刪最舊的未中獎紀錄
+export const HISTORY_LIMIT = 300;
 const INVOICE_DATA_LIMIT = 100;
 
 /** 歷史紀錄或記帳資料變動時發出，讓不同區塊（手動對獎、Gmail）同步顯示 */
@@ -33,13 +34,27 @@ const writeList = (key: string, list: unknown[]) => {
 
 export const getHistory = (): HistoryItem[] => readList<HistoryItem>(KEY);
 
+/** 超過上限時，從最舊的開始刪掉未中獎紀錄；中獎（含疑似）紀錄留到最後才刪 */
+export const trimHistory = (list: HistoryItem[], limit = HISTORY_LIMIT): HistoryItem[] => {
+  if (list.length <= limit) return list;
+  let excess = list.length - limit;
+  const kept = [...list];
+  for (let i = kept.length - 1; i >= 0 && excess > 0; i--) {
+    if (!kept[i].result.isMatch) {
+      kept.splice(i, 1);
+      excess--;
+    }
+  }
+  return kept.slice(0, limit);
+};
+
 const isSameCheck = (a: HistoryItem, b: HistoryItem) =>
   a.number === b.number && (a.result.period || '') === (b.result.period || '');
 
 /** 新增一筆紀錄到最前面；同號碼、同期別的舊紀錄會被取代，不重複列出 */
 export const saveHistoryItem = (item: HistoryItem): HistoryItem[] => {
   const history = getHistory().filter(existing => !isSameCheck(existing, item));
-  const newHistory = [item, ...history].slice(0, HISTORY_LIMIT);
+  const newHistory = trimHistory([item, ...history]);
   saveHistoryList(newHistory);
   return newHistory;
 };
@@ -48,7 +63,7 @@ export const saveHistoryItem = (item: HistoryItem): HistoryItem[] => {
 export const addHistoryItems = (items: HistoryItem[]): HistoryItem[] => {
   if (items.length === 0) return getHistory();
   const history = getHistory().filter(existing => !items.some(item => isSameCheck(existing, item)));
-  const newHistory = [...items, ...history].slice(0, HISTORY_LIMIT);
+  const newHistory = trimHistory([...items, ...history]);
   saveHistoryList(newHistory);
   return newHistory;
 };
@@ -66,7 +81,7 @@ export const upsertTypedHistoryItem = (item: HistoryItem, editWindowMs = 10_000)
     item.timestamp - last.timestamp < editWindowMs &&
     (item.number.startsWith(last.number) || last.number.startsWith(item.number));
   const rest = (isEditOfLast ? history.slice(1) : history).filter(existing => !isSameCheck(existing, item));
-  const newHistory = [item, ...rest].slice(0, HISTORY_LIMIT);
+  const newHistory = trimHistory([item, ...rest]);
   saveHistoryList(newHistory);
   return newHistory;
 };

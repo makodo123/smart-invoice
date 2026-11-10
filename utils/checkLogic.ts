@@ -1,5 +1,5 @@
 import { WinningNumbers, PrizeType, CheckResult } from '../types';
-import { findPeriodIndexForDate, formatMonthDay, getComparePeriods, parseInvoiceDate, parsePeriod, periodOfDate } from './period';
+import { findPeriodIndexForDate, formatMonthDay, getComparePeriods, isClaimExpired, parseInvoiceDate, parsePeriod, periodOfDate } from './period';
 
 const getPrizeAmount = (type: PrizeType): number => {
   switch (type) {
@@ -136,12 +136,14 @@ const PRIZE_RANK: Record<PrizeType, number> = {
   [PrizeType.None]: 99,
 };
 
-/** 從多期結果中挑出最值得顯示的一筆：確定中獎 > 疑似中獎 > 未中獎 */
-export const pickBestResult = (results: CheckResult[]): CheckResult | null => {
+/** 從多期結果中挑出最值得顯示的一筆：確定中獎 > 疑似中獎 > 已過領獎期限的中獎 > 未中獎 */
+export const pickBestResult = (results: CheckResult[], now: Date = new Date()): CheckResult | null => {
   if (results.length === 0) return null;
   const score = (result: CheckResult) => {
     if (!result.isMatch) return 1000;
-    return (result.isPartial ? 100 : 0) + PRIZE_RANK[result.prizeType];
+    // 已過領獎期限的中獎排在還能領的後面（仍比未中獎前面）
+    const expired = result.period && isClaimExpired(result.period, now) ? 500 : 0;
+    return expired + (result.isPartial ? 100 : 0) + PRIZE_RANK[result.prizeType];
   };
   return results.reduce((best, current) => (score(current) < score(best) ? current : best));
 };

@@ -45,7 +45,11 @@ const readQuickMode = () => {
 
 /** 末 3 碼對中、要輸入完整號碼才知道獎項：至少六獎（可能更高）或與特別獎／特獎末碼相同 */
 export const needsFullNumber = (result: CheckResult | null): boolean =>
-  Boolean(result?.isMatch && (result.mayBeHigher || result.isPartial));
+  Boolean(result?.isMatch && (result.mayBeHigher || result.isPartial) && !(result.period && isClaimExpired(result.period)));
+
+/** 只和已過領獎期限的期別相同：不能領獎，不必再核對完整號碼 */
+const isExpiredMatch = (result: CheckResult | null): boolean =>
+  Boolean(result?.isMatch && result.period && isClaimExpired(result.period));
 
 const formatHistoryTime = (timestamp: number) =>
   new Date(timestamp).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -368,6 +372,7 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
   };
 
   const getResultColor = (res: CheckResult) => {
+    if (isExpiredMatch(res)) return 'bg-gray-100 text-gray-600 border border-gray-200';
     if (res.isPartial) return 'bg-orange-100 text-orange-800 border-2 border-orange-300';
     if (res.periodUnknown) return 'bg-slate-100 text-slate-700 border border-slate-200';
     switch (res.prizeType) {
@@ -383,6 +388,7 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
   };
 
   const resultHeadline = (res: CheckResult) => {
+    if (isExpiredMatch(res)) return '⌛ 已過領獎期限';
     if (res.isPartial) return '⚠️ 疑似中獎';
     if (res.mayBeHigher) return `🎉 至少中${res.prizeType.split(' ')[0]}！`;
     return '🎉 恭喜中獎！';
@@ -396,7 +402,7 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
       </h3>
       {comparePeriods.length > 0 && (
         <p className="text-xs text-gray-500 mb-4">
-          輸入號碼會{comparePeriods.length > 1 ? '同時' : ''}比對 {comparePeriods.map(item => (isClaimExpired(item.period) ? `${item.period}（已過領獎期限）` : item.period)).join(' 和 ')}（可在下方獎號表切換）；掃描發票會自動選對期別。
+          輸入號碼會{comparePeriods.length > 1 ? '同時' : ''}比對 {comparePeriods.map(item => (isClaimExpired(item.period) ? `${item.period}（已過領獎期限）` : item.period)).join(' 和 ')}。可在下方獎號表切換期別；掃描發票會自動選對期別。
         </p>
       )}
       {!isReady && (
@@ -430,7 +436,7 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
               else handleManualCheck(value);
             }}
             onFocus={(e) => e.currentTarget.select()}
-            placeholder={!quickMode ? '輸入末 3 碼或完整 8 碼' : pendingWin ? '輸入這張發票的完整 8 碼' : '輸入末 3 碼'}
+            placeholder={!quickMode ? '輸入末 3 碼或完整 8 碼' : pendingWin ? '輸入完整 8 碼' : '輸入末 3 碼'}
             className="w-full text-center text-3xl font-mono tracking-widest py-4 rounded-xl border-2 border-indigo-100 focus:border-indigo-500 focus:ring focus:ring-indigo-200 transition-all outline-none text-gray-700 placeholder:text-xl placeholder:text-gray-300"
             disabled={!isReady || isScanning}
           />
@@ -454,15 +460,15 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
           <button
             onClick={() => setIsScannerOpen(true)}
             disabled={!isReady || isScanning}
-            className={`flex-1 md:flex-none min-w-0 flex items-center justify-center px-4 md:px-6 py-4 rounded-xl font-bold transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
+            className={`flex-1 md:flex-none min-w-0 flex items-center justify-center px-3 min-[360px]:px-4 md:px-6 py-4 rounded-xl font-bold transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
               isScanning
                 ? 'bg-gray-100 text-gray-400 cursor-wait'
                 : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95'
             }`}
             title="掃描電子發票 QR Code"
           >
-            <span className="flex items-center whitespace-nowrap">
-              <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
+            <span className="flex items-center whitespace-nowrap max-[359px]:text-sm">
+              <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 max-[359px]:hidden"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
               {isScanning ? '辨識中...' : '掃描 QR Code'}
             </span>
           </button>
@@ -482,11 +488,29 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
             className="shrink-0 flex items-center justify-center gap-1.5 px-3 md:px-4 py-4 rounded-xl font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 active:scale-95 transition-all border border-gray-200 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
             title="選擇或拍攝發票照片"
           >
-            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            <svg aria-hidden="true" className="max-[359px]:hidden" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
             <span className="text-sm">上傳照片</span>
           </button>
         </div>
       </div>
+
+      {/* 連續對獎：結果與提示緊接在輸入框下方，手機鍵盤開著也看得到 */}
+      {quickMode && pendingWin ? (
+        <div className="mb-3 p-3 rounded-lg border-2 border-amber-300 bg-amber-50 text-amber-900 text-sm flex items-center justify-between gap-3" aria-live="polite">
+          <span>
+            末 3 碼 <span className="font-mono font-bold">{pendingWin.number}</span> 對中了！請輸入這張發票的<span className="font-bold">完整 8 碼</span>確認獎項。
+          </span>
+          <button type="button" onClick={skipPendingWin} className="shrink-0 underline font-medium">先略過</button>
+        </div>
+      ) : quickMode && result && checkedNumber ? (
+        <p
+          className={`mb-3 px-3 py-2 rounded-lg text-sm ${result.isMatch && !isExpiredMatch(result) ? 'bg-red-50 text-red-700 font-bold' : 'bg-gray-50 text-gray-600'}`}
+          aria-live="polite"
+        >
+          {checkedNumber.length === 3 ? '末 3 碼' : '號碼'} <span className="font-mono font-bold">{checkedNumber}</span>：
+          {isExpiredMatch(result) ? `只和已過領獎期限的 ${result.period} 相同` : resultLabel(result)}・已記錄
+        </p>
+      ) : null}
 
       <label className="mb-3 flex items-start gap-2 text-sm text-gray-600 cursor-pointer select-none">
         <input type="checkbox" checked={quickMode} onChange={toggleQuickMode} className="mt-0.5 w-4 h-4 accent-indigo-600" />
@@ -533,39 +557,31 @@ const CheckSection: React.FC<Props> = ({ winningNumbersList, selectedIndex }) =>
       )}
 
       {/* Result Display */}
-      <div aria-live="polite">
-        {quickMode && pendingWin && (
-          <div className="mb-3 p-3 rounded-lg border-2 border-amber-300 bg-amber-50 text-amber-900 text-sm flex items-start justify-between gap-3">
-            <span>
-              末 3 碼 <span className="font-mono font-bold">{pendingWin.number}</span> 對中了！請拿出這張發票，在上方輸入<span className="font-bold">完整 8 碼</span>確認獎項。
-            </span>
-            <button type="button" onClick={skipPendingWin} className="shrink-0 underline font-medium">先略過</button>
-          </div>
-        )}
-        {result && quickMode && checkedNumber && (
-          <p className="mb-2 text-sm text-gray-500">
-            {checkedNumber.length === 3 ? '末 3 碼' : '號碼'} <span className="font-mono font-bold text-gray-700">{checkedNumber}</span> 的結果・已記錄
-          </p>
-        )}
+      {/* 連續對獎時由輸入框下方的精簡結果朗讀，避免重複 */}
+      <div aria-live={quickMode ? undefined : 'polite'}>
         {result && (
           <div className={`rounded-xl p-6 text-center transition-all duration-300 transform ${getResultColor(result)}`}>
             {result.isMatch ? (
               <div>
                 {result.period && (
-                  <div className={`inline-block mb-3 px-3 py-1 rounded-full text-sm font-bold ${isBigPrize(result) ? 'bg-black/20 text-white' : 'bg-black/10'}`}>
+                  <div className={`inline-block mb-3 px-3 py-1 rounded-full text-sm font-bold ${isBigPrize(result) && !isExpiredMatch(result) ? 'bg-black/20 text-white' : 'bg-black/10'}`}>
                     {result.period} {result.isCurrentPeriod ? '(最新一期)' : ''}
                   </div>
                 )}
-                <div className={`${result.isPartial ? 'text-2xl' : 'text-3xl'} font-bold mb-2`}>{resultHeadline(result)}</div>
-                <div className={result.isPartial ? 'text-base opacity-80' : 'text-xl opacity-90'}>
-                  {result.isPartial ? `對照：${result.prizeType}` : result.prizeType}
+                <div className={`${result.isPartial || isExpiredMatch(result) ? 'text-2xl' : 'text-3xl'} font-bold mb-2`}>{resultHeadline(result)}</div>
+                <div className={result.isPartial || isExpiredMatch(result) ? 'text-base opacity-80' : 'text-xl opacity-90'}>
+                  {result.isPartial || isExpiredMatch(result) ? `對照：${result.prizeType}` : result.prizeType}
                 </div>
-                {(result.isPartial || result.mayBeHigher) && result.description && (
+                {/* 等待輸入完整號碼時，輸入框下方已提示輸入完整 8 碼，不重複「至少 X 獎」的同一句 */}
+                {(result.isPartial || result.mayBeHigher) && result.description && !isExpiredMatch(result)
+                  && !(result.mayBeHigher && quickMode && pendingWin && checkedNumber === pendingWin.number) && (
                   <div className="mt-2 text-sm font-medium">{result.description}</div>
                 )}
                 {result.matchedNumber && <div className="mt-4 font-mono font-bold bg-white/20 inline-block px-4 py-1 rounded">對照獎號：{result.matchedNumber}</div>}
-                {result.period && isClaimExpired(result.period) ? (
-                  <div className="mt-3 text-sm font-bold bg-black/20 rounded px-3 py-1 inline-block">⚠️ 此期已超過領獎期限</div>
+                {isExpiredMatch(result) ? (
+                  <div className="mt-3 text-sm">
+                    這期的領獎期限到 {formatShortDate(getClaimWindow(result.period!)!.claimEnd)} 為止，已經不能領獎。
+                  </div>
                 ) : !result.isPartial && <ClaimInfo result={result} />}
               </div>
             ) : result.periodUnknown ? (
