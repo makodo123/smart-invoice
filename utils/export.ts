@@ -1,7 +1,9 @@
 import { InvoiceData } from '../types';
 
 const csvCell = (value: string | number | undefined | null) => {
-  const text = value === undefined || value === null ? '' : String(value);
+  let text = value === undefined || value === null ? '' : String(value);
+  // 防止 CSV 公式注入：文字以 = + - @ 或定位、換行字元開頭時，Excel 會當成公式執行，前面加 ' 讓它只顯示文字
+  if (typeof value === 'string' && /^[=+\-@\t\r]/.test(text)) text = `'${text}`;
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 };
 

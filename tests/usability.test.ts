@@ -237,6 +237,19 @@ describe('預估實拿獎金', () => {
 });
 
 describe('匯出 CSV', () => {
+  test('商家名稱以公式字元開頭時加上單引號，Excel 不會執行', () => {
+    const rows = ['=HYPERLINK("http://x")', '+1+1', '-2', '@SUM(A1)'].map((storeName) => ({
+      invoiceNumber: '12345678', date: '2026/07/05', amount: 100, storeName,
+    }));
+    const lines = buildInvoiceCSV(rows).split('\n').slice(1);
+    expect(lines[0]).toContain(`"'=HYPERLINK(""http://x"")"`);
+    expect(lines[1]).toContain(",'+1+1,");
+    expect(lines[2]).toContain(",'-2,");
+    expect(lines[3]).toContain(",'@SUM(A1),");
+    // 一般商家名稱不受影響
+    expect(buildInvoiceCSV([{ invoiceNumber: '1', date: '', amount: 0, storeName: '全家便利商店' }])).toContain(',全家便利商店,');
+  });
+
   test('包含字軌號碼、統編、對獎期別與結果，並保留開頭的 0', () => {
     const csv = buildInvoiceCSV([{
       invoiceNumber: '06595111', fullNumber: 'AB06595111', date: '2026/07/05', amount: 110,

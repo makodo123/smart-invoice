@@ -215,7 +215,6 @@ export const fetchLatestWinningNumbers = async (forceRefresh = false): Promise<W
     `${baseUrl}/api/invoice.xml`,
     '/api/invoice.xml',
     TARGET_URL,
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(TARGET_URL)}&t=${Date.now()}`
   ];
 
   // 同時向所有來源發出請求，採用最先回傳有效資料的一個，避免逐一等待逾時
